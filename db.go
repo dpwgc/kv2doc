@@ -2,8 +2,10 @@ package kv2doc
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/google/uuid"
 	"kv2doc/store"
+	"reflect"
 	"strings"
 	"sync"
 )
@@ -32,10 +34,14 @@ func (c *DB) Drop(index string) error {
 	return c.store.DropIndex(index)
 }
 
-func (c *DB) Insert(index string, document Document) (id string, err error) {
+func (c *DB) Insert(index string, obj any) (id string, err error) {
+
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	lower := toLower(document)
+
+	doc := toDocumentFromStruct(obj)
+
+	lower := toLower(doc)
 	idPath := ""
 	for {
 		id = genID()
@@ -70,10 +76,12 @@ func (c *DB) Insert(index string, document Document) (id string, err error) {
 	return id, nil
 }
 
-func (c *DB) Update(index string, id string, document Document) (err error) {
+func (c *DB) Update(index string, id string, obj any) (err error) {
 
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
+
+	doc := toDocumentFromStruct(obj)
 
 	idPath := toPath(primaryKey, id)
 
@@ -85,7 +93,7 @@ func (c *DB) Update(index string, id string, document Document) (err error) {
 		return nil
 	}
 
-	lower := toLower(document)
+	lower := toLower(doc)
 	lower[primaryKey] = id
 	var kvs []store.KV
 	kvs = append(kvs, store.KV{
@@ -291,4 +299,32 @@ func toLower(doc Document) Document {
 		res[strings.ToLower(k)] = v
 	}
 	return res
+}
+
+func toDocumentFromStruct(obj any) Document {
+
+	doc, ok := obj.(Document)
+	if ok {
+		return doc
+	}
+
+	doc = make(map[string]string)
+
+	obj1 := reflect.TypeOf(obj)
+	obj2 := reflect.ValueOf(obj)
+
+	if obj2.Kind() == reflect.Map {
+		marshal, _ := json.Marshal(obj)
+		aa := make(map[any]any)
+		_ = json.Unmarshal(marshal, &aa)
+		for k, v := range aa {
+			doc[fmt.Sprintf("%v", k)] = fmt.Sprintf("%v", v)
+		}
+		return doc
+	}
+
+	for i := 0; i < obj1.NumField(); i++ {
+		doc[obj1.Field(i).Name] = fmt.Sprintf("%v", obj2.Field(i).Interface())
+	}
+	return doc
 }
