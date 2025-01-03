@@ -7,6 +7,8 @@ import (
 	"strings"
 )
 
+const ID = "_id"
+
 type Document map[string]string
 
 type DB struct {
@@ -23,67 +25,126 @@ func NewDB(path string) (*DB, error) {
 	}, nil
 }
 
-func (c *DB) CreateIndex(index string) error {
-	return c.store.CreateIndex(index)
+func (c *DB) Drop(index string) error {
+	return c.store.DropIndex(index)
 }
 
-func (c *DB) DeleteIndex(index string) error {
-	return c.store.DeleteIndex(index)
-}
-
-func (c *DB) PutDocument(index string, document Document) error {
+func (c *DB) Insert(index string, document Document) (string, error) {
 	toLower := make(map[string]string, len(document))
 	for k, v := range document {
 		toLower[strings.ToLower(k)] = v
 	}
-	if len(toLower["id"]) <= 0 {
-		toLower["id"] = uuid.New().String()
+	for {
+		toLower[ID] = uuid.New().String()
+		ck, err := c.store.GetKV(index, toKey(ID, toLower[ID]))
+		if err != nil {
+			return "", err
+		}
+		if !ck.Exist {
+			break
+		}
 	}
-	var commands []store.KvCommand
+	var commands []store.KV
+	marshal, err := json.Marshal(toLower)
+	if err != nil {
+		return "", err
+	}
+	commands = append(commands, store.KV{
+		Key:   toKey(ID, toLower[ID]),
+		Value: string(marshal),
+	})
+	for k, v := range toLower {
+		if k == ID {
+			continue
+		}
+		commands = append(commands, store.KV{
+			Key:   toKey(k, v, toLower[ID]),
+			Value: toLower[ID],
+		})
+	}
+	err = c.store.SetKV(index, commands)
+	if err != nil {
+		return "", err
+	}
+	return toLower[ID], nil
+}
+
+func (c *DB) Update(index string, id string, document Document) error {
+	toLower := make(map[string]string, len(document))
+	for k, v := range document {
+		toLower[strings.ToLower(k)] = v
+	}
+	toLower[ID] = id
+	var commands []store.KV
 	marshal, err := json.Marshal(toLower)
 	if err != nil {
 		return err
 	}
-	commands = append(commands, store.KvCommand{
-		Key:   "id/" + toLower["id"],
+	commands = append(commands, store.KV{
+		Key:   toKey(ID, toLower[ID]),
 		Value: string(marshal),
 	})
 	for k, v := range toLower {
-		if k == "id" {
+		if k == "_id" {
 			continue
 		}
-		commands = append(commands, store.KvCommand{
-			Key:   k + "/" + v + "/" + toLower["id"],
-			Value: toLower["id"],
+		commands = append(commands, store.KV{
+			Key:   toKey(k, v, toLower[ID]),
+			Value: toLower[ID],
 		})
 	}
-	return c.store.PutKv(index, commands)
+	return c.store.SetKV(index, commands)
 }
 
-func (c *DB) DeleteDocument(index string, id string) error {
-	str, err := c.store.GetKv(index, "id/"+id)
+func (c *DB) Delete(index string, id string) error {
+	doc, err := c.store.GetKV(index, toKey(ID, id))
 	if err != nil {
 		return err
 	}
-	if len(str) <= 0 {
+	if !doc.Exist {
 		return nil
 	}
 	document := Document{}
-	err = json.Unmarshal([]byte(str), &document)
+	err = json.Unmarshal([]byte(doc.Value), &document)
 	if err != nil {
 		return err
 	}
-	var commands []store.KvCommand
-	commands = append(commands, store.KvCommand{
-		Key: "id/" + id,
+	var kvs []store.KV
+	kvs = append(kvs, store.KV{
+		Key: toKey(ID, id),
 	})
 	for k, v := range document {
-		if k == "id" {
+		if k == ID {
 			continue
 		}
-		commands = append(commands, store.KvCommand{
-			Key: k + "/" + v + "/" + document["id"],
+		kvs = append(kvs, store.KV{
+			Key: toKey(k, v, document[ID]),
 		})
 	}
-	return c.store.DeleteKv(index, commands)
+	return c.store.SetKV(index, kvs)
+}
+
+func (c *DB) Select(index string, field, value string) ([]Document, error) {
+	ids, err := c.store.ScanKV(index, toKey(field, value))
+	if err != nil {
+		return nil, err
+	}
+	var docs []Document
+	for _, v := range ids {
+		docSrc, err := c.store.GetKV(index, toKey(ID, v.Value))
+		if err != nil {
+			return nil, err
+		}
+		var doc = Document{}
+		err = json.Unmarshal([]byte(docSrc.Value), &doc)
+		if err != nil {
+			return nil, err
+		}
+		docs = append(docs, doc)
+	}
+	return docs, nil
+}
+
+func toKey(s ...string) string {
+	return strings.Join(s, "/")
 }

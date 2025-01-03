@@ -6,8 +6,7 @@ import (
 )
 
 type Bolt struct {
-	maxID int64
-	db    *bolt.DB
+	db *bolt.DB
 }
 
 func NewBolt(path string) (*Bolt, error) {
@@ -21,30 +20,31 @@ func NewBolt(path string) (*Bolt, error) {
 	}, nil
 }
 
-func (c *Bolt) CreateIndex(index string) (err error) {
-	return c.db.Update(func(tx *bolt.Tx) error {
-		_, err = tx.CreateBucketIfNotExists([]byte(index))
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-}
-
-func (c *Bolt) DeleteIndex(index string) (err error) {
+func (c *Bolt) DropIndex(index string) (err error) {
 	return c.db.Update(func(tx *bolt.Tx) error {
 		return tx.DeleteBucket([]byte(index))
 	})
 }
 
-func (c *Bolt) PutKv(index string, commands []KvCommand) error {
+func (c *Bolt) SetKV(index string, kvs []KV) error {
 	return c.db.Update(func(tx *bolt.Tx) error {
+		_, err := tx.CreateBucketIfNotExists([]byte(index))
+		if err != nil {
+			return err
+		}
 		bucket := tx.Bucket([]byte(index))
 		if bucket != nil {
-			for _, v := range commands {
-				err := bucket.Put([]byte(v.Key), []byte(v.Value))
-				if err != nil {
-					return err
+			for _, v := range kvs {
+				if len(v.Value) <= 0 {
+					err := bucket.Delete([]byte(v.Key))
+					if err != nil {
+						return err
+					}
+				} else {
+					err := bucket.Put([]byte(v.Key), []byte(v.Value))
+					if err != nil {
+						return err
+					}
 				}
 			}
 		}
@@ -52,40 +52,33 @@ func (c *Bolt) PutKv(index string, commands []KvCommand) error {
 	})
 }
 
-func (c *Bolt) DeleteKv(index string, commands []KvCommand) error {
-	return c.db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(index))
-		if bucket != nil {
-			for _, v := range commands {
-				err := bucket.Delete([]byte(v.Key))
-				if err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	})
-}
-
-func (c *Bolt) GetKv(index, key string) (value string, err error) {
+func (c *Bolt) GetKV(index, key string) (kv KV, err error) {
 	err = c.db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(index))
 		if bucket != nil {
-			value = string(bucket.Get([]byte(key)))
+			kv = KV{
+				Exist: true,
+				Key:   key,
+				Value: string(bucket.Get([]byte(key))),
+			}
 		}
 		return nil
 	})
-	return value, err
+	return kv, err
 }
 
-func (c *Bolt) ListKv(index, prefix string) (values []string, err error) {
+func (c *Bolt) ScanKV(index, prefix string) (kvs []KV, err error) {
 	err = c.db.View(func(tx *bolt.Tx) error {
 		pbs := []byte(prefix)
 		cur := tx.Bucket([]byte(index)).Cursor()
 		for k, v := cur.Seek(pbs); k != nil && bytes.HasPrefix(k, pbs); k, v = cur.Next() {
-			values = append(values, string(v))
+			kvs = append(kvs, KV{
+				Exist: true,
+				Key:   string(k),
+				Value: string(v),
+			})
 		}
 		return nil
 	})
-	return values, err
+	return kvs, err
 }

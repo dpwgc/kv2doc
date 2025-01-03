@@ -1,15 +1,14 @@
 package store
 
 type Store interface {
-	CreateIndex(index string) error
-	DeleteIndex(index string) error
-	PutKv(index string, commands []KvCommand) error
-	DeleteKv(index string, commands []KvCommand) error
-	GetKv(index, key string) (string, error)
-	ListKv(index, prefix string) ([]string, error)
+	DropIndex(index string) error
+	SetKV(index string, kvs []KV) error
+	GetKV(index, key string) (KV, error)
+	ScanKV(index, prefix string) ([]KV, error)
 }
 
-type KvCommand struct {
+type KV struct {
+	Exist bool
 	Key   string
 	Value string
 }
