@@ -56,10 +56,13 @@ func (c *Bolt) GetKV(index, key string) (kv KV, err error) {
 	err = c.db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(index))
 		if bucket != nil {
-			kv = KV{
-				Exist: true,
-				Key:   key,
-				Value: string(bucket.Get([]byte(key))),
+			v := string(bucket.Get([]byte(key)))
+			if len(v) > 0 {
+				kv = KV{
+					Exist: true,
+					Key:   key,
+					Value: v,
+				}
 			}
 		}
 		return nil
@@ -67,11 +70,14 @@ func (c *Bolt) GetKV(index, key string) (kv KV, err error) {
 	return kv, err
 }
 
-func (c *Bolt) ScanKV(index, prefix string) (kvs []KV, err error) {
+func (c *Bolt) ScanKV(index, prefix string, filter func(key, value string) bool) (kvs []KV, err error) {
 	err = c.db.View(func(tx *bolt.Tx) error {
 		pbs := []byte(prefix)
 		cur := tx.Bucket([]byte(index)).Cursor()
 		for k, v := cur.Seek(pbs); k != nil && bytes.HasPrefix(k, pbs); k, v = cur.Next() {
+			if !filter(string(k), string(v)) {
+				continue
+			}
 			kvs = append(kvs, KV{
 				Exist: true,
 				Key:   string(k),

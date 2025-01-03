@@ -5,14 +5,16 @@ import (
 	"github.com/google/uuid"
 	"kv2doc/store"
 	"strings"
+	"sync"
 )
 
-const ID = "_id"
+const primaryKey = "_id"
 
 type Document map[string]string
 
 type DB struct {
 	store store.Store
+	mutex *sync.Mutex
 }
 
 func NewDB(path string) (*DB, error) {
@@ -22,6 +24,7 @@ func NewDB(path string) (*DB, error) {
 	}
 	return &DB{
 		store: bolt,
+		mutex: &sync.Mutex{},
 	}, nil
 }
 
@@ -29,14 +32,15 @@ func (c *DB) Drop(index string) error {
 	return c.store.DropIndex(index)
 }
 
-func (c *DB) Insert(index string, document Document) (string, error) {
-	toLower := make(map[string]string, len(document))
-	for k, v := range document {
-		toLower[strings.ToLower(k)] = v
-	}
+func (c *DB) Insert(index string, document Document) (id string, err error) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	lower := toLower(document)
+	idPath := ""
 	for {
-		toLower[ID] = uuid.New().String()
-		ck, err := c.store.GetKV(index, toKey(ID, toLower[ID]))
+		id = genID()
+		idPath = toPath(primaryKey, id)
+		ck, err := c.store.GetKV(index, idPath)
 		if err != nil {
 			return "", err
 		}
@@ -44,107 +48,247 @@ func (c *DB) Insert(index string, document Document) (string, error) {
 			break
 		}
 	}
-	var commands []store.KV
-	marshal, err := json.Marshal(toLower)
-	if err != nil {
-		return "", err
-	}
-	commands = append(commands, store.KV{
-		Key:   toKey(ID, toLower[ID]),
-		Value: string(marshal),
-	})
-	for k, v := range toLower {
-		if k == ID {
-			continue
-		}
-		commands = append(commands, store.KV{
-			Key:   toKey(k, v, toLower[ID]),
-			Value: toLower[ID],
-		})
-	}
-	err = c.store.SetKV(index, commands)
-	if err != nil {
-		return "", err
-	}
-	return toLower[ID], nil
-}
-
-func (c *DB) Update(index string, id string, document Document) error {
-	toLower := make(map[string]string, len(document))
-	for k, v := range document {
-		toLower[strings.ToLower(k)] = v
-	}
-	toLower[ID] = id
-	var commands []store.KV
-	marshal, err := json.Marshal(toLower)
-	if err != nil {
-		return err
-	}
-	commands = append(commands, store.KV{
-		Key:   toKey(ID, toLower[ID]),
-		Value: string(marshal),
-	})
-	for k, v := range toLower {
-		if k == "_id" {
-			continue
-		}
-		commands = append(commands, store.KV{
-			Key:   toKey(k, v, toLower[ID]),
-			Value: toLower[ID],
-		})
-	}
-	return c.store.SetKV(index, commands)
-}
-
-func (c *DB) Delete(index string, id string) error {
-	doc, err := c.store.GetKV(index, toKey(ID, id))
-	if err != nil {
-		return err
-	}
-	if !doc.Exist {
-		return nil
-	}
-	document := Document{}
-	err = json.Unmarshal([]byte(doc.Value), &document)
-	if err != nil {
-		return err
-	}
+	lower[primaryKey] = id
 	var kvs []store.KV
 	kvs = append(kvs, store.KV{
-		Key: toKey(ID, id),
+		Key:   idPath,
+		Value: toString(lower),
 	})
-	for k, v := range document {
-		if k == ID {
+	for k, v := range lower {
+		if k == primaryKey {
 			continue
 		}
 		kvs = append(kvs, store.KV{
-			Key: toKey(k, v, document[ID]),
+			Key:   toPath(k, v, id),
+			Value: id,
+		})
+	}
+	err = c.store.SetKV(index, kvs)
+	if err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func (c *DB) Update(index string, id string, document Document) (err error) {
+
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	idPath := toPath(primaryKey, id)
+
+	ck, err := c.store.GetKV(index, idPath)
+	if err != nil {
+		return err
+	}
+	if !ck.Exist {
+		return nil
+	}
+
+	lower := toLower(document)
+	lower[primaryKey] = id
+	var kvs []store.KV
+	kvs = append(kvs, store.KV{
+		Key:   idPath,
+		Value: toString(lower),
+	})
+	for k, v := range lower {
+		if k == primaryKey {
+			continue
+		}
+		kvs = append(kvs, store.KV{
+			Key:   toPath(k, v, id),
+			Value: id,
 		})
 	}
 	return c.store.SetKV(index, kvs)
 }
 
-func (c *DB) Select(index string, field, value string) ([]Document, error) {
-	ids, err := c.store.ScanKV(index, toKey(field, value))
+func (c *DB) Delete(index string, id string) (err error) {
+	idPath := toPath(primaryKey, id)
+	docSrc, err := c.store.GetKV(index, idPath)
+	if err != nil {
+		return err
+	}
+	if !docSrc.Exist {
+		return nil
+	}
+	doc := toDocument(docSrc.Value)
+	var kvs []store.KV
+	kvs = append(kvs, store.KV{
+		Key: idPath,
+	})
+	for k, v := range doc {
+		if k == primaryKey {
+			continue
+		}
+		kvs = append(kvs, store.KV{
+			Key: toPath(k, v, doc[primaryKey]),
+		})
+	}
+	return c.store.SetKV(index, kvs)
+}
+
+func (c *DB) Select(index string, query *Query) (docs []Document, err error) {
+	var ids []store.KV
+	if len(query.hitID) > 0 {
+		docSrc, err := c.store.GetKV(index, toPath(primaryKey, query.hitID))
+		if err != nil {
+			return nil, err
+		}
+		if !docSrc.Exist {
+			return nil, nil
+		}
+		docs = append(docs, toDocument(docSrc.Value))
+		return docs, nil
+	}
+	cache := make(map[string]Document)
+	filter := func(key, value string) bool {
+		ok := true
+		for _, v := range query.expressions {
+			if v.Middle == equal && key != toPath(v.Left, v.Right, value) {
+				ok = false
+			}
+			if v.Middle == leftLike && !strings.HasPrefix(key, toPath(v.Left, v.Right)) {
+				ok = false
+			}
+			if v.Middle == rightLike && !strings.HasSuffix(key, toPath(v.Right, value)) {
+				ok = false
+			}
+			if v.Middle == like && !strings.HasPrefix(key, toPath(v.Left, v.Right)) && !strings.HasSuffix(key, toPath(v.Right, value)) {
+				ok = false
+			}
+		}
+		if ok {
+			// 检查文档是否存在
+			docSrc, _ := c.store.GetKV(index, toPath(primaryKey, value))
+			doc := toDocument(docSrc.Value)
+			if len(doc) <= 0 {
+				return false
+			}
+			cache[value] = doc
+		}
+		return ok
+	}
+	if len(query.hitField) > 0 && len(query.hitValue) > 0 {
+		// 走索引
+		ids, err = c.store.ScanKV(index, toPath(query.hitField, query.hitValue), filter)
+	} else {
+		// 全表扫描
+		ids, err = c.store.ScanKV(index, "", filter)
+	}
 	if err != nil {
 		return nil, err
 	}
-	var docs []Document
 	for _, v := range ids {
-		docSrc, err := c.store.GetKV(index, toKey(ID, v.Value))
-		if err != nil {
-			return nil, err
-		}
-		var doc = Document{}
-		err = json.Unmarshal([]byte(docSrc.Value), &doc)
-		if err != nil {
-			return nil, err
-		}
-		docs = append(docs, doc)
+		docs = append(docs, cache[v.Value])
 	}
 	return docs, nil
 }
 
-func toKey(s ...string) string {
+func NewQuery() *Query {
+	return &Query{}
+}
+
+type Query struct {
+	expressions []Expression
+	hitField    string
+	hitValue    string
+	hitID       string
+}
+
+type Expression struct {
+	Left   string
+	Middle uint8
+	Right  string
+}
+
+const equal = 1
+const like = 2
+const leftLike = 3
+const rightLike = 4
+
+func (c *Query) Equal(field, value string) *Query {
+	if len(field) <= 0 || len(value) <= 0 {
+		return c
+	}
+	c.expressions = append(c.expressions, Expression{
+		Left:   field,
+		Middle: equal,
+		Right:  value,
+	})
+	if len(c.hitField) <= 0 {
+		c.hitField = field
+		c.hitValue = value
+	}
+	if field == primaryKey {
+		c.hitID = value
+	}
+	return c
+}
+
+func (c *Query) Like(field, value string) *Query {
+	if len(field) <= 0 || len(value) <= 0 || field == primaryKey {
+		return c
+	}
+	c.expressions = append(c.expressions, Expression{
+		Left:   field,
+		Middle: like,
+		Right:  value,
+	})
+	return c
+}
+
+func (c *Query) LeftLike(field, value string) *Query {
+	if len(field) <= 0 || len(value) <= 0 || field == primaryKey {
+		return c
+	}
+	c.expressions = append(c.expressions, Expression{
+		Left:   field,
+		Middle: leftLike,
+		Right:  value,
+	})
+	return c
+}
+
+func (c *Query) RightLike(field, value string) *Query {
+	if len(field) <= 0 || len(value) <= 0 || field == primaryKey {
+		return c
+	}
+	c.expressions = append(c.expressions, Expression{
+		Left:   field,
+		Middle: rightLike,
+		Right:  value,
+	})
+	return c
+}
+
+func genID() string {
+	return strings.ReplaceAll(uuid.New().String(), "-", "")
+}
+
+func toPath(s ...string) string {
 	return strings.Join(s, "/")
+}
+
+func toDocument(src string) Document {
+	var doc = Document{}
+	_ = json.Unmarshal([]byte(src), &doc)
+	return doc
+}
+
+func toString(doc Document) string {
+	marshal, err := json.Marshal(doc)
+	if err != nil {
+		return ""
+	}
+	return string(marshal)
+}
+
+func toLower(doc Document) Document {
+	res := make(map[string]string, len(doc))
+	for k, v := range doc {
+		res[strings.ToLower(k)] = v
+	}
+	return res
 }
