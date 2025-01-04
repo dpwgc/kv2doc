@@ -40,6 +40,11 @@ func (c *DB) Insert(table string, doc Doc) (id string, err error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
+	err = c.store.CreateTable(table)
+	if err != nil {
+		return "", err
+	}
+
 	id, err = c.store.NextID(table)
 	if err != nil {
 		return "", err

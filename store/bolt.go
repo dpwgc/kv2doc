@@ -7,7 +7,8 @@ import (
 )
 
 type Bolt struct {
-	db *bolt.DB
+	db          *bolt.DB
+	tableExists map[string]bool
 }
 
 func NewBolt(path string) (*Bolt, error) {
@@ -17,8 +18,28 @@ func NewBolt(path string) (*Bolt, error) {
 		return nil, err
 	}
 	return &Bolt{
-		db: db,
+		db:          db,
+		tableExists: make(map[string]bool),
 	}, nil
+}
+
+func (c *Bolt) CreateTable(table string) (err error) {
+	if len(table) <= 0 {
+		return nil
+	}
+	defer func() {
+		if err == nil {
+			c.tableExists[table] = true
+		}
+	}()
+	// table存在就不再执行方法了
+	if c.tableExists[table] {
+		return nil
+	}
+	return c.db.Update(func(tx *bolt.Tx) error {
+		_, err = tx.CreateBucketIfNotExists([]byte(table))
+		return err
+	})
 }
 
 func (c *Bolt) DropTable(table string) (err error) {
@@ -38,13 +59,16 @@ func (c *Bolt) SetKV(table string, kvs []KV) error {
 		bucket := tx.Bucket([]byte(table))
 		if bucket != nil {
 			for _, v := range kvs {
+				if len(v.Key) <= 0 {
+					continue
+				}
 				if len(v.Value) <= 0 {
 					err := bucket.Delete([]byte(v.Key))
 					if err != nil {
 						return err
 					}
 				} else {
-					err := bucket.Put([]byte(v.Key), []byte(v.Value))
+					err := bucket.Put([]byte(v.Key), v.Value)
 					if err != nil {
 						return err
 					}
@@ -99,10 +123,6 @@ func (c *Bolt) ScanKV(table, prefix string, handle func(key string, value []byte
 
 func (c *Bolt) NextID(table string) (id string, err error) {
 	err = c.db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists([]byte(table))
-		if err != nil {
-			return err
-		}
 		id64, err := tx.Bucket([]byte(table)).NextSequence()
 		if err != nil {
 			return err
