@@ -2,13 +2,13 @@ package kv2doc
 
 import "encoding/json"
 
-type Document map[string]string
+type Doc map[string]string
 
-func (c Document) isEmpty() bool {
+func (c Doc) isEmpty() bool {
 	return len(c) <= 0
 }
 
-func (c Document) toString() string {
+func (c Doc) toString() string {
 	marshal, err := json.Marshal(c)
 	if err != nil {
 		return ""
@@ -16,7 +16,7 @@ func (c Document) toString() string {
 	return string(marshal)
 }
 
-func (c Document) fromString(src string) Document {
+func (c Doc) fromString(src string) Doc {
 	_ = json.Unmarshal([]byte(src), &c)
 	return c
 }

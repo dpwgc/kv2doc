@@ -12,7 +12,7 @@ func main() {
 		panic(err)
 	}
 
-	_, err = db.Insert("test", kv2doc.Document{
+	_, err = db.Insert("test", kv2doc.Doc{
 		"title": "hello world 1",
 		"type":  "1",
 	})
@@ -20,7 +20,7 @@ func main() {
 		panic(err)
 	}
 
-	_, err = db.Insert("test", kv2doc.Document{
+	_, err = db.Insert("test", kv2doc.Doc{
 		"title": "hello world 2",
 		"type":  "2",
 	})
@@ -28,7 +28,7 @@ func main() {
 		panic(err)
 	}
 
-	_, err = db.Insert("test", kv2doc.Document{
+	_, err = db.Insert("test", kv2doc.Doc{
 		"title": "hello world 3",
 		"type":  "3",
 	})

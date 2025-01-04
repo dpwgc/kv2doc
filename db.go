@@ -29,7 +29,7 @@ func (c *DB) Drop(index string) error {
 	return c.store.DropIndex(index)
 }
 
-func (c *DB) Insert(index string, doc Document) (id string, err error) {
+func (c *DB) Insert(index string, doc Doc) (id string, err error) {
 
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
@@ -63,7 +63,7 @@ func (c *DB) Insert(index string, doc Document) (id string, err error) {
 	return id, nil
 }
 
-func (c *DB) Update(index string, id string, doc Document) (err error) {
+func (c *DB) Update(index string, id string, doc Doc) (err error) {
 
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
@@ -76,7 +76,7 @@ func (c *DB) Update(index string, id string, doc Document) (err error) {
 	if !kv.Exist {
 		return nil
 	}
-	old := Document{}.fromString(kv.Value)
+	old := Doc{}.fromString(kv.Value)
 
 	doc[primaryKey] = id
 	var kvs []store.KV
@@ -116,7 +116,7 @@ func (c *DB) Delete(index string, id string) (err error) {
 	if !kv.Exist {
 		return nil
 	}
-	old := Document{}.fromString(kv.Value)
+	old := Doc{}.fromString(kv.Value)
 
 	var kvs []store.KV
 	kvs = append(kvs, store.KV{
@@ -130,7 +130,7 @@ func (c *DB) Delete(index string, id string) (err error) {
 	return c.store.SetKV(index, kvs)
 }
 
-func (c *DB) Select(index string, query *Query) (docs []Document, err error) {
+func (c *DB) Select(index string, query *Query) (docs []Doc, err error) {
 	cursor := 0
 	handle := func(key, id string) bool {
 		// 到达页数限制，结束检索
@@ -154,7 +154,7 @@ func (c *DB) Select(index string, query *Query) (docs []Document, err error) {
 		// 获取文档内容
 		kv, _ := c.store.GetKV(index, toPath(primaryKey, id))
 		if kv.Exist {
-			doc := Document{}.fromString(kv.Value)
+			doc := Doc{}.fromString(kv.Value)
 			if !doc.isEmpty() {
 				// 如果还未到达指定游标
 				if query.limit.enable && query.limit.cursor > cursor {
