@@ -1,12 +1,12 @@
 package kv2doc
 
 type Query struct {
-	expressions []expression
-	hit         hit
-	limit       limit
+	conditions []condition
+	hit        hit
+	limit      limit
 }
 
-func NewQuery() *Query {
+func Filter() *Query {
 	return &Query{}
 }
 
@@ -25,7 +25,7 @@ type limit struct {
 	size   int
 }
 
-type expression struct {
+type condition struct {
 	Left   string
 	Middle uint8
 	Right  []string
@@ -121,7 +121,7 @@ func (c *Query) add(middle uint8, field string, values ...string) {
 	if len(vs) <= 0 {
 		return
 	}
-	c.expressions = append(c.expressions, expression{
+	c.conditions = append(c.conditions, condition{
 		Left:   field,
 		Middle: middle,
 		Right:  vs,

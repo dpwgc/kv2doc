@@ -188,7 +188,7 @@ func (c *DB) baseSelect(table string, query *Query, justCount bool) (count int64
 		id = doc[primaryKey]
 
 		must := true
-		for _, v := range query.expressions {
+		for _, v := range query.conditions {
 			dbVal := toPath(v.Left, doc[v.Left], id)
 			if v.Middle == eq && dbVal != toPath(v.Left, v.Right[0], id) {
 				must = false

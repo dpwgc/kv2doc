@@ -44,7 +44,7 @@ func main() {
 
 	// 编写查询条件：title 以 hello 为前缀，并且 type 要大于 1，结果集里取前10条返回
 	// 使用 Eq 或 LeftLike 进行查询时，会走最左前缀索引，其他查询方法走全表扫描
-	query := kv2doc.NewQuery().LeftLike("title", "hello").Gt("type", "1").Limit(0, 10)
+	query := kv2doc.Filter().LeftLike("title", "hello").Gt("type", "1").Limit(0, 10)
 
 	// 查询数据库
 	documents, _ := db.SelectList("test_table", query)
