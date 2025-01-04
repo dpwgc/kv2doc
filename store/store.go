@@ -1,15 +1,16 @@
 package store
 
 type Store interface {
-	DropTable(table string) error
-	SetKV(table string, kvs []KV) error
-	GetKV(table, key string) (KV, error)
-	ScanKV(table, prefix string, handle func(key, value string) bool) error
+	DropTable(table string) (err error)
+	SetKV(table string, kvs []KV) (err error)
+	GetKV(table, key string) (kv KV, err error)
+	ScanKV(table, prefix string, handle func(key string, value []byte) bool) (err error)
+	NextID(table string) (id string, err error)
 }
 
 type KV struct {
 	Key   string
-	Value string
+	Value []byte
 }
 
 func (c KV) IsExist() bool {

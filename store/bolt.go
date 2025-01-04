@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"github.com/boltdb/bolt"
+	"strconv"
 )
 
 type Bolt struct {
@@ -34,10 +35,6 @@ func (c *Bolt) SetKV(table string, kvs []KV) error {
 		return nil
 	}
 	return c.db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists([]byte(table))
-		if err != nil {
-			return err
-		}
 		bucket := tx.Bucket([]byte(table))
 		if bucket != nil {
 			for _, v := range kvs {
@@ -65,12 +62,9 @@ func (c *Bolt) GetKV(table, key string) (kv KV, err error) {
 	err = c.db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(table))
 		if bucket != nil {
-			v := string(bucket.Get([]byte(key)))
-			if len(v) > 0 {
-				kv = KV{
-					Key:   key,
-					Value: v,
-				}
+			kv = KV{
+				Key:   key,
+				Value: bucket.Get([]byte(key)),
 			}
 		}
 		return nil
@@ -78,7 +72,7 @@ func (c *Bolt) GetKV(table, key string) (kv KV, err error) {
 	return kv, err
 }
 
-func (c *Bolt) ScanKV(table, prefix string, handle func(key, value string) bool) error {
+func (c *Bolt) ScanKV(table, prefix string, handle func(key string, value []byte) bool) error {
 	if len(table) <= 0 || handle == nil {
 		return nil
 	}
@@ -87,18 +81,34 @@ func (c *Bolt) ScanKV(table, prefix string, handle func(key, value string) bool)
 			pbs := []byte(prefix)
 			cur := tx.Bucket([]byte(table)).Cursor()
 			for k, v := cur.Seek(pbs); k != nil && bytes.HasPrefix(k, pbs); k, v = cur.Next() {
-				if !handle(string(k), string(v)) {
+				if !handle(string(k), v) {
 					return nil
 				}
 			}
 		} else {
 			cur := tx.Bucket([]byte(table)).Cursor()
 			for k, v := cur.First(); k != nil; k, v = cur.Next() {
-				if !handle(string(k), string(v)) {
+				if !handle(string(k), v) {
 					return nil
 				}
 			}
 		}
 		return nil
 	})
+}
+
+func (c *Bolt) NextID(table string) (id string, err error) {
+	err = c.db.Update(func(tx *bolt.Tx) error {
+		_, err := tx.CreateBucketIfNotExists([]byte(table))
+		if err != nil {
+			return err
+		}
+		id64, err := tx.Bucket([]byte(table)).NextSequence()
+		if err != nil {
+			return err
+		}
+		id = strconv.FormatUint(id64, 10)
+		return nil
+	})
+	return id, err
 }

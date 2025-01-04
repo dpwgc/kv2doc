@@ -12,15 +12,15 @@ func (c Doc) hasKey(key string) bool {
 	return len(c[key]) > 0
 }
 
-func (c Doc) toString() string {
+func (c Doc) toBytes() []byte {
 	marshal, err := json.Marshal(c)
 	if err != nil {
-		return ""
+		return nil
 	}
-	return string(marshal)
+	return marshal
 }
 
-func (c Doc) fromString(src string) Doc {
-	_ = json.Unmarshal([]byte(src), &c)
+func (c Doc) fromBytes(src []byte) Doc {
+	_ = json.Unmarshal(src, &c)
 	return c
 }

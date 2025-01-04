@@ -1,6 +1,6 @@
 # kv2doc
 
-## 一个简单的嵌入式文档型数据库实现（基于 BoltDB 存储底层数据）
+## 一个简单的嵌入式文档数据库实现
 
 ### 实现功能
 
@@ -60,40 +60,39 @@ func main() {
 
 ### 存储实现原理
 
-* 因为 BoltDB 自带 Table 实现，所以只管文档记录存储实现
-
-#### 假设有一个文档，Json 格式如下（ _id 是主键，新增时自动生成）
+#### 假设有一个文档，Json 格式如下（ _id 为文档主键，使用 BoltDB 的 NextSequence 方法获取）
 
 ```json
 {
-  "_id": "ef31201c058947a7819ff01484f6a134",
+  "_id": "123",
   "title": "hello world",
   "type": "1",
   "color": "red"
 }
 ```
 
-#### 在保存此文档时，会将该文档的非主键字段拆解成索引，分别存进 BoltDB 键值对中，Key 是字段名 + 字段值 + 主键 id，Value 是文档主键 id
+#### 在保存此文档时，会将该文档的非主键字段拆解成索引，分别存进 BoltDB 键值对中，Key 是字段名 + 字段值 + 主键 id，Value 是主键 id
 
-| key                                                  | value                            |
-|------------------------------------------------------|----------------------------------|
-| f/title/hello world/ef31201c058947a7819ff01484f6a134 | ef31201c058947a7819ff01484f6a134 |
-| f/type/1/ef31201c058947a7819ff01484f6a134            | ef31201c058947a7819ff01484f6a134 |
-| f/color/red/ef31201c058947a7819ff01484f6a134         | ef31201c058947a7819ff01484f6a134 |
+| key                     | value |
+|-------------------------|-------|
+| f/_id/123/123           | 123   |
+| f/title/hello world/123 | 123   |
+| f/type/1/123            | 123   |
+| f/color/red/123         | 123   |
 
 #### 上述表格展示的是字段索引（ key 以 f 前缀开头），只有文档 id，没有文档内容。而真正的文档内容，保存在主键 Key 下（ key 以 p 前缀开头）
 
-| key                                    | value            |
-|----------------------------------------|------------------|
-| p/_id/ef31201c058947a7819ff01484f6a134 | { ...文档内容省略... } |
+| key       | value                                                                 |
+|-----------|-----------------------------------------------------------------------|
+| p/_id/123 | { "_id": "123", "title": "hello world", "type": "1", "color": "red" } |
 
 ***
 
 ### 查询实现原理
 
-#### 查询情况可分为两种：命中索引 or 全表扫描
+#### 查询情况可分为两种：索引扫描 or 全表扫描
 
-#### 命中索引：
+#### 索引扫描：
 
 * 如果使用了 Eq（等于）或者 LeftLike（具有相同前缀的字符串），则会按最左前缀原则匹配索引
 
@@ -127,4 +126,25 @@ ScanBoltDB("p") get doc
 if doc["type"] < 3 
 ->
 hit
+```
+
+***
+
+### 自定义存储实现
+
+#### 可以使用其他带事务功能的键值数据库来充当存储引擎，只需实现下述接口（务必确保所有操作方法都有事务保障），并调用 ByStore 方法生成数据库实例即可
+
+```go
+type Store interface {
+    DropTable(table string) (err error)
+    SetKV(table string, kvs []KV) (err error)
+    GetKV(table, key string) (kv KV, err error)
+    ScanKV(table, prefix string, handle func(key string, value []byte) bool) (err error)
+    NextID(table string) (id string, err error)
+}
+```
+
+```go
+db := kv2doc.ByStore(rocketStore)
+db := kv2doc.ByStore(etcdStore)
 ```
