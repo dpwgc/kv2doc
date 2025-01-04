@@ -47,7 +47,7 @@ func main() {
 	query := kv2doc.NewQuery().LeftLike("title", "hello").Gt("type", "1").Limit(0, 10)
 
 	// 查询数据库
-	documents, _ := db.Select("test_table", query)
+	documents, _ := db.SelectList("test_table", query)
 
 	// 打印查询结果
 	for _, v := range documents {

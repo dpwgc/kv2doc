@@ -131,7 +131,38 @@ func (c *DB) Delete(table string, id string) (err error) {
 	return c.store.SetKV(table, kvs)
 }
 
-func (c *DB) Select(table string, query *Query) (docs []Doc, err error) {
+func (c *DB) SelectOne(table string, query *Query) (docs Doc, err error) {
+	query.limit.enable = true
+	query.limit.size = 1
+	list, err := c.SelectList(table, query)
+	if err != nil {
+		return nil, err
+	}
+	if len(list) <= 0 {
+		return nil, nil
+	}
+	return list[0], nil
+}
+
+func (c *DB) SelectCount(table string, query *Query) (int64, error) {
+	query.limit.enable = false
+	count, _, err := c.baseSelect(table, query, true)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (c *DB) SelectList(table string, query *Query) (docs []Doc, err error) {
+	_, list, err := c.baseSelect(table, query, false)
+	if err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+func (c *DB) baseSelect(table string, query *Query, justCount bool) (count int64, docs []Doc, err error) {
+	count = 0
 	cursor := 0
 	handle := func(key string, value []byte) bool {
 		// 到达页数限制，结束检索
@@ -224,7 +255,11 @@ func (c *DB) Select(table string, query *Query) (docs []Doc, err error) {
 			if query.limit.enable && query.limit.cursor > cursor {
 				cursor++
 			} else {
-				docs = append(docs, doc)
+				if justCount {
+					count++
+				} else {
+					docs = append(docs, doc)
+				}
 			}
 		}
 		return true
@@ -234,12 +269,12 @@ func (c *DB) Select(table string, query *Query) (docs []Doc, err error) {
 		err = c.store.ScanKV(table, toPath(fieldPrefix, query.hit.field, query.hit.value), handle)
 	} else {
 		// 全表扫描
-		err = c.store.ScanKV(table, toPath(primaryPrefix, primaryKey), handle)
+		err = c.store.ScanKV(table, primaryPrefix, handle)
 	}
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
-	return docs, nil
+	return count, docs, nil
 }
 
 func toPath(s ...string) string {
