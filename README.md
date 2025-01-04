@@ -1,3 +1,12 @@
+# kv2doc
+
+## 一个简单的嵌入式文档型数据库（基于BoltDB实现）
+
+***
+
+### 使用示例
+
+```go
 package main
 
 import (
@@ -19,7 +28,7 @@ func main() {
 		"title": "hello world 2",
 		"type":  "2",
 	})
-
+	
 	// 更新第2条数据，新增一个color字段
 	_ = db.Update("test_table", id, kv2doc.Doc{
 		"title": "hello world 2",
@@ -38,3 +47,8 @@ func main() {
 		fmt.Println(v)
 	}
 }
+```
+
+***
+
+### 实现原理

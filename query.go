@@ -28,7 +28,7 @@ type limit struct {
 type expression struct {
 	Left   string
 	Middle uint8
-	Right  string
+	Right  []string
 }
 
 func (c *Query) Limit(cursor, size int) *Query {
@@ -42,16 +42,24 @@ func (c *Query) Limit(cursor, size int) *Query {
 }
 
 const eq = 1
-const gt = 2
-const gte = 3
-const lt = 4
-const lte = 5
-const like = 6
-const leftLike = 7
-const rightLike = 8
+const ne = 2
+const in = 3
+const notIn = 4
+const gt = 5
+const gte = 6
+const lt = 7
+const lte = 8
+const like = 9
+const leftLike = 10
+const rightLike = 11
 
 func (c *Query) Eq(field, value string) *Query {
 	c.add(eq, field, value)
+	return c
+}
+
+func (c *Query) Ne(field, value string) *Query {
+	c.add(ne, field, value)
 	return c
 }
 
@@ -75,6 +83,16 @@ func (c *Query) Lte(field, value string) *Query {
 	return c
 }
 
+func (c *Query) In(field string, values ...string) *Query {
+	c.add(in, field, values...)
+	return c
+}
+
+func (c *Query) NotIn(field string, values ...string) *Query {
+	c.add(notIn, field, values...)
+	return c
+}
+
 func (c *Query) Like(field, value string) *Query {
 	c.add(like, field, value)
 	return c
@@ -90,19 +108,28 @@ func (c *Query) RightLike(field, value string) *Query {
 	return c
 }
 
-func (c *Query) add(middle uint8, field, value string) {
-	if len(field) <= 0 || len(value) <= 0 {
+func (c *Query) add(middle uint8, field string, values ...string) {
+	if len(field) <= 0 || len(values) <= 0 {
+		return
+	}
+	var vs []string
+	for _, v := range values {
+		if len(v) > 0 {
+			vs = append(vs, v)
+		}
+	}
+	if len(vs) <= 0 {
 		return
 	}
 	c.expressions = append(c.expressions, expression{
 		Left:   field,
 		Middle: middle,
-		Right:  value,
+		Right:  vs,
 	})
 	if middle == eq || middle == leftLike {
 		if !c.hit.IsExist() {
 			c.hit.field = field
-			c.hit.value = value
+			c.hit.value = vs[0]
 		}
 	}
 }

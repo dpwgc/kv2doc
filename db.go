@@ -9,6 +9,8 @@ import (
 )
 
 const primaryKey = "_id"
+const primaryPrefix = "p"
+const fieldPrefix = "f"
 
 type DB struct {
 	store store.Store
@@ -37,7 +39,7 @@ func (c *DB) Insert(table string, doc Doc) (id string, err error) {
 
 	for {
 		id = genID()
-		ck, err := c.store.GetKV(table, toPath(primaryKey, id))
+		ck, err := c.store.GetKV(table, toPath(primaryPrefix, primaryKey, id))
 		if err != nil {
 			return "", err
 		}
@@ -48,12 +50,12 @@ func (c *DB) Insert(table string, doc Doc) (id string, err error) {
 	doc[primaryKey] = id
 	var kvs []store.KV
 	kvs = append(kvs, store.KV{
-		Key:   toPath(primaryKey, id),
+		Key:   toPath(primaryPrefix, primaryKey, id),
 		Value: doc.toString(),
 	})
 	for k, v := range doc {
 		kvs = append(kvs, store.KV{
-			Key:   toPath(k, v, id),
+			Key:   toPath(fieldPrefix, k, v, id),
 			Value: id,
 		})
 	}
@@ -70,7 +72,7 @@ func (c *DB) Update(table string, id string, doc Doc) (err error) {
 	defer c.mutex.Unlock()
 
 	// 获取老的文档
-	kv, err := c.store.GetKV(table, toPath(primaryKey, id))
+	kv, err := c.store.GetKV(table, toPath(primaryPrefix, primaryKey, id))
 	if err != nil {
 		return err
 	}
@@ -82,7 +84,7 @@ func (c *DB) Update(table string, id string, doc Doc) (err error) {
 	doc[primaryKey] = id
 	var kvs []store.KV
 	kvs = append(kvs, store.KV{
-		Key:   toPath(primaryKey, id),
+		Key:   toPath(primaryPrefix, primaryKey, id),
 		Value: doc.toString(),
 	})
 
@@ -91,14 +93,14 @@ func (c *DB) Update(table string, id string, doc Doc) (err error) {
 		if old.hasKey(k) && !doc.hasKey(k) {
 			// 删除这个字段
 			kvs = append(kvs, store.KV{
-				Key: toPath(k, old[k], id),
+				Key: toPath(fieldPrefix, k, old[k], id),
 			})
 		}
 	}
 
 	for k, v := range doc {
 		kvs = append(kvs, store.KV{
-			Key:   toPath(k, v, id),
+			Key:   toPath(fieldPrefix, k, v, id),
 			Value: id,
 		})
 	}
@@ -110,7 +112,7 @@ func (c *DB) Delete(table string, id string) (err error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	kv, err := c.store.GetKV(table, toPath(primaryKey, id))
+	kv, err := c.store.GetKV(table, toPath(primaryPrefix, primaryKey, id))
 	if err != nil {
 		return err
 	}
@@ -121,11 +123,11 @@ func (c *DB) Delete(table string, id string) (err error) {
 
 	var kvs []store.KV
 	kvs = append(kvs, store.KV{
-		Key: toPath(primaryKey, id),
+		Key: toPath(primaryPrefix, primaryKey, id),
 	})
 	for k, v := range old {
 		kvs = append(kvs, store.KV{
-			Key: toPath(k, v, old[primaryKey]),
+			Key: toPath(fieldPrefix, k, v, old[primaryKey]),
 		})
 	}
 	return c.store.SetKV(table, kvs)
@@ -133,68 +135,108 @@ func (c *DB) Delete(table string, id string) (err error) {
 
 func (c *DB) Select(table string, query *Query) (docs []Doc, err error) {
 	cursor := 0
-	handle := func(key, id string) bool {
+	handle := func(key, value string) bool {
 		// 到达页数限制，结束检索
 		if query.limit.enable && len(docs) >= query.limit.size {
 			return false
 		}
+		id := ""
+		doc := Doc{}
+		// 如果是主键，value就是文档内容，直接解析
+		if strings.HasPrefix(key, primaryPrefix) {
+			doc = doc.fromString(value)
+		} else {
+			// 不是主键，那value就是文档id，要根据id获取文档内容
+			kv, _ := c.store.GetKV(table, toPath(primaryPrefix, primaryKey, value))
+			if !kv.IsExist() {
+				return true
+			}
+			doc = doc.fromString(kv.Value)
+		}
+		if doc.isEmpty() || len(doc[primaryKey]) <= 0 {
+			return true
+		}
+		id = doc[primaryKey]
+
+		must := true
 		for _, v := range query.expressions {
-			if v.Middle == eq && key != toPath(v.Left, v.Right, id) {
-				return true
+			dbVal := toPath(v.Left, doc[v.Left], id)
+			if v.Middle == eq && dbVal != toPath(v.Left, v.Right[0], id) {
+				must = false
 			}
-			if v.Middle == leftLike && !strings.HasPrefix(key, toPath(v.Left, v.Right)) {
-				return true
+			if v.Middle == ne && dbVal == toPath(v.Left, v.Right[0], id) {
+				must = false
 			}
-			if v.Middle == rightLike && !strings.HasSuffix(key, toPath(v.Right, id)) {
-				return true
+			if v.Middle == leftLike && !strings.HasPrefix(dbVal, toPath(v.Left, v.Right[0])) {
+				must = false
 			}
-			if v.Middle == like && !strings.HasPrefix(key, toPath(v.Left, v.Right)) && !strings.HasSuffix(key, toPath(v.Right, id)) {
-				return true
+			if v.Middle == rightLike && !strings.HasSuffix(dbVal, toPath(v.Right[0], id)) {
+				must = false
+			}
+			if v.Middle == like && !strings.HasPrefix(dbVal, toPath(v.Left, v.Right[0])) && !strings.HasSuffix(dbVal, toPath(v.Right[0], id)) {
+				must = false
 			}
 			if v.Middle == gt || v.Middle == gte || v.Middle == lt || v.Middle == lte {
-				l, err := toDouble(strings.ReplaceAll(strings.ReplaceAll(key, v.Left+"/", ""), "/"+id, ""))
+				l, err := toDouble(strings.ReplaceAll(strings.ReplaceAll(dbVal, v.Left+"/", ""), "/"+id, ""))
 				if err != nil {
-					return true
+					must = false
 				}
-				r, err := toDouble(v.Right)
+				r, err := toDouble(v.Right[0])
 				if err != nil {
-					return true
+					must = false
 				}
 				if v.Middle == gt && !(l > r) {
-					return true
+					must = false
 				}
 				if v.Middle == gte && !(l >= r) {
-					return true
+					must = false
 				}
 				if v.Middle == lt && !(l < r) {
-					return true
+					must = false
 				}
 				if v.Middle == lte && !(l <= r) {
-					return true
+					must = false
+				}
+			}
+			if v.Middle == in {
+				has := false
+				for i := 0; i < len(v.Right); i++ {
+					if dbVal == toPath(v.Left, v.Right[i], id) {
+						has = true
+					}
+				}
+				if !has {
+					must = false
+				}
+			}
+			if v.Middle == notIn {
+				has := false
+				for i := 0; i < len(v.Right); i++ {
+					if dbVal == toPath(v.Left, v.Right[i], id) {
+						has = true
+					}
+				}
+				if has {
+					must = false
 				}
 			}
 		}
-		// 获取文档内容
-		kv, _ := c.store.GetKV(table, toPath(primaryKey, id))
-		if kv.IsExist() {
-			doc := Doc{}.fromString(kv.Value)
-			if !doc.isEmpty() {
-				// 如果还未到达指定游标
-				if query.limit.enable && query.limit.cursor > cursor {
-					cursor++
-				} else {
-					docs = append(docs, doc)
-				}
+		if must {
+			// 如果还未到达指定游标
+			if query.limit.enable && query.limit.cursor > cursor {
+				cursor++
+			} else {
+				docs = append(docs, doc)
 			}
 		}
 		return true
 	}
 	if query.hit.IsExist() {
 		// 走索引
-		err = c.store.ScanKV(table, toPath(query.hit.field, query.hit.value), handle)
+		err = c.store.ScanKV(table, toPath(fieldPrefix, query.hit.field, query.hit.value), handle)
 	} else {
 		// 全表扫描
-		err = c.store.ScanKV(table, "", handle)
+		err = c.store.ScanKV(table, primaryPrefix, handle)
 	}
 	if err != nil {
 		return nil, err
