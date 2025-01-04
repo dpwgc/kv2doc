@@ -20,25 +20,25 @@ func NewBolt(path string) (*Bolt, error) {
 	}, nil
 }
 
-func (c *Bolt) DropIndex(index string) (err error) {
-	if len(index) <= 0 {
+func (c *Bolt) DropTable(table string) (err error) {
+	if len(table) <= 0 {
 		return nil
 	}
 	return c.db.Update(func(tx *bolt.Tx) error {
-		return tx.DeleteBucket([]byte(index))
+		return tx.DeleteBucket([]byte(table))
 	})
 }
 
-func (c *Bolt) SetKV(index string, kvs []KV) error {
-	if len(index) <= 0 || len(kvs) <= 0 {
+func (c *Bolt) SetKV(table string, kvs []KV) error {
+	if len(table) <= 0 || len(kvs) <= 0 {
 		return nil
 	}
 	return c.db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists([]byte(index))
+		_, err := tx.CreateBucketIfNotExists([]byte(table))
 		if err != nil {
 			return err
 		}
-		bucket := tx.Bucket([]byte(index))
+		bucket := tx.Bucket([]byte(table))
 		if bucket != nil {
 			for _, v := range kvs {
 				if len(v.Value) <= 0 {
@@ -58,12 +58,12 @@ func (c *Bolt) SetKV(index string, kvs []KV) error {
 	})
 }
 
-func (c *Bolt) GetKV(index, key string) (kv KV, err error) {
-	if len(index) <= 0 || len(key) <= 0 {
+func (c *Bolt) GetKV(table, key string) (kv KV, err error) {
+	if len(table) <= 0 || len(key) <= 0 {
 		return KV{}, nil
 	}
 	err = c.db.View(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(index))
+		bucket := tx.Bucket([]byte(table))
 		if bucket != nil {
 			v := string(bucket.Get([]byte(key)))
 			if len(v) > 0 {
@@ -78,21 +78,21 @@ func (c *Bolt) GetKV(index, key string) (kv KV, err error) {
 	return kv, err
 }
 
-func (c *Bolt) ScanKV(index, prefix string, handle func(key, value string) bool) error {
-	if len(index) <= 0 || handle == nil {
+func (c *Bolt) ScanKV(table, prefix string, handle func(key, value string) bool) error {
+	if len(table) <= 0 || handle == nil {
 		return nil
 	}
 	return c.db.View(func(tx *bolt.Tx) error {
 		if len(prefix) > 0 {
 			pbs := []byte(prefix)
-			cur := tx.Bucket([]byte(index)).Cursor()
+			cur := tx.Bucket([]byte(table)).Cursor()
 			for k, v := cur.Seek(pbs); k != nil && bytes.HasPrefix(k, pbs); k, v = cur.Next() {
 				if !handle(string(k), string(v)) {
 					return nil
 				}
 			}
 		} else {
-			cur := tx.Bucket([]byte(index)).Cursor()
+			cur := tx.Bucket([]byte(table)).Cursor()
 			for k, v := cur.First(); k != nil; k, v = cur.Next() {
 				if !handle(string(k), string(v)) {
 					return nil

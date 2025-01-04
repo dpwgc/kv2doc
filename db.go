@@ -26,18 +26,18 @@ func NewDB(path string) (*DB, error) {
 	}, nil
 }
 
-func (c *DB) Drop(index string) error {
-	return c.store.DropIndex(index)
+func (c *DB) Drop(table string) error {
+	return c.store.DropTable(table)
 }
 
-func (c *DB) Insert(index string, doc Doc) (id string, err error) {
+func (c *DB) Insert(table string, doc Doc) (id string, err error) {
 
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
 	for {
 		id = genID()
-		ck, err := c.store.GetKV(index, toPath(primaryKey, id))
+		ck, err := c.store.GetKV(table, toPath(primaryKey, id))
 		if err != nil {
 			return "", err
 		}
@@ -57,20 +57,20 @@ func (c *DB) Insert(index string, doc Doc) (id string, err error) {
 			Value: id,
 		})
 	}
-	err = c.store.SetKV(index, kvs)
+	err = c.store.SetKV(table, kvs)
 	if err != nil {
 		return "", err
 	}
 	return id, nil
 }
 
-func (c *DB) Update(index string, id string, doc Doc) (err error) {
+func (c *DB) Update(table string, id string, doc Doc) (err error) {
 
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
 	// 获取老的文档
-	kv, err := c.store.GetKV(index, toPath(primaryKey, id))
+	kv, err := c.store.GetKV(table, toPath(primaryKey, id))
 	if err != nil {
 		return err
 	}
@@ -102,15 +102,15 @@ func (c *DB) Update(index string, id string, doc Doc) (err error) {
 			Value: id,
 		})
 	}
-	return c.store.SetKV(index, kvs)
+	return c.store.SetKV(table, kvs)
 }
 
-func (c *DB) Delete(index string, id string) (err error) {
+func (c *DB) Delete(table string, id string) (err error) {
 
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	kv, err := c.store.GetKV(index, toPath(primaryKey, id))
+	kv, err := c.store.GetKV(table, toPath(primaryKey, id))
 	if err != nil {
 		return err
 	}
@@ -128,10 +128,10 @@ func (c *DB) Delete(index string, id string) (err error) {
 			Key: toPath(k, v, old[primaryKey]),
 		})
 	}
-	return c.store.SetKV(index, kvs)
+	return c.store.SetKV(table, kvs)
 }
 
-func (c *DB) Select(index string, query *Query) (docs []Doc, err error) {
+func (c *DB) Select(table string, query *Query) (docs []Doc, err error) {
 	cursor := 0
 	handle := func(key, id string) bool {
 		// 到达页数限制，结束检索
@@ -175,7 +175,7 @@ func (c *DB) Select(index string, query *Query) (docs []Doc, err error) {
 			}
 		}
 		// 获取文档内容
-		kv, _ := c.store.GetKV(index, toPath(primaryKey, id))
+		kv, _ := c.store.GetKV(table, toPath(primaryKey, id))
 		if kv.IsExist() {
 			doc := Doc{}.fromString(kv.Value)
 			if !doc.isEmpty() {
@@ -191,10 +191,10 @@ func (c *DB) Select(index string, query *Query) (docs []Doc, err error) {
 	}
 	if query.hit.IsExist() {
 		// 走索引
-		err = c.store.ScanKV(index, toPath(query.hit.field, query.hit.value), handle)
+		err = c.store.ScanKV(table, toPath(query.hit.field, query.hit.value), handle)
 	} else {
 		// 全表扫描
-		err = c.store.ScanKV(index, "", handle)
+		err = c.store.ScanKV(table, "", handle)
 	}
 	if err != nil {
 		return nil, err
