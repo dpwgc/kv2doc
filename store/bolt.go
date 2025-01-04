@@ -70,21 +70,15 @@ func (c *Bolt) GetKV(index, key string) (kv KV, err error) {
 	return kv, err
 }
 
-func (c *Bolt) ScanKV(index, prefix string, filter func(key, value string) bool) (kvs []KV, err error) {
-	err = c.db.View(func(tx *bolt.Tx) error {
+func (c *Bolt) ScanKV(index, prefix string, handle func(key, value string) bool) error {
+	return c.db.View(func(tx *bolt.Tx) error {
 		pbs := []byte(prefix)
 		cur := tx.Bucket([]byte(index)).Cursor()
 		for k, v := cur.Seek(pbs); k != nil && bytes.HasPrefix(k, pbs); k, v = cur.Next() {
-			if !filter(string(k), string(v)) {
-				continue
+			if !handle(string(k), string(v)) {
+				return nil
 			}
-			kvs = append(kvs, KV{
-				Exist: true,
-				Key:   string(k),
-				Value: string(v),
-			})
 		}
 		return nil
 	})
-	return kvs, err
 }
