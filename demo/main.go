@@ -36,7 +36,7 @@ func main() {
 		panic(err)
 	}
 
-	documents, err := db.Select("test", kv2doc.NewQuery().LeftLike("title", "hello"))
+	documents, err := db.Select("test", kv2doc.NewQuery().Gt("type", "1"))
 	if err != nil {
 		panic(err)
 	}

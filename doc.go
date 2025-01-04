@@ -8,6 +8,10 @@ func (c Doc) isEmpty() bool {
 	return len(c) <= 0
 }
 
+func (c Doc) hasKey(key string) bool {
+	return len(c[key]) > 0
+}
+
 func (c Doc) toString() string {
 	marshal, err := json.Marshal(c)
 	if err != nil {

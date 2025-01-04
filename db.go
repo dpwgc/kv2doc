@@ -3,6 +3,7 @@ package kv2doc
 import (
 	"github.com/google/uuid"
 	"kv2doc/store"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -40,7 +41,7 @@ func (c *DB) Insert(index string, doc Doc) (id string, err error) {
 		if err != nil {
 			return "", err
 		}
-		if !ck.Exist {
+		if !ck.IsExist() {
 			break
 		}
 	}
@@ -73,7 +74,7 @@ func (c *DB) Update(index string, id string, doc Doc) (err error) {
 	if err != nil {
 		return err
 	}
-	if !kv.Exist {
+	if !kv.IsExist() {
 		return nil
 	}
 	old := Doc{}.fromString(kv.Value)
@@ -87,7 +88,7 @@ func (c *DB) Update(index string, id string, doc Doc) (err error) {
 
 	for k := range old {
 		// 如果新保存的文档不包含这个老的字段
-		if len(old[k]) > 0 && len(doc[k]) <= 0 {
+		if old.hasKey(k) && !doc.hasKey(k) {
 			// 删除这个字段
 			kvs = append(kvs, store.KV{
 				Key: toPath(k, old[k], id),
@@ -113,7 +114,7 @@ func (c *DB) Delete(index string, id string) (err error) {
 	if err != nil {
 		return err
 	}
-	if !kv.Exist {
+	if !kv.IsExist() {
 		return nil
 	}
 	old := Doc{}.fromString(kv.Value)
@@ -150,10 +151,32 @@ func (c *DB) Select(index string, query *Query) (docs []Doc, err error) {
 			if v.Middle == like && !strings.HasPrefix(key, toPath(v.Left, v.Right)) && !strings.HasSuffix(key, toPath(v.Right, id)) {
 				return true
 			}
+			if v.Middle == gt || v.Middle == gte || v.Middle == lt || v.Middle == lte {
+				l, err := toDouble(strings.ReplaceAll(strings.ReplaceAll(key, v.Left+"/", ""), "/"+id, ""))
+				if err != nil {
+					return true
+				}
+				r, err := toDouble(v.Right)
+				if err != nil {
+					return true
+				}
+				if v.Middle == gt && !(l > r) {
+					return true
+				}
+				if v.Middle == gte && !(l >= r) {
+					return true
+				}
+				if v.Middle == lt && !(l < r) {
+					return true
+				}
+				if v.Middle == lte && !(l <= r) {
+					return true
+				}
+			}
 		}
 		// 获取文档内容
 		kv, _ := c.store.GetKV(index, toPath(primaryKey, id))
-		if kv.Exist {
+		if kv.IsExist() {
 			doc := Doc{}.fromString(kv.Value)
 			if !doc.isEmpty() {
 				// 如果还未到达指定游标
@@ -166,7 +189,7 @@ func (c *DB) Select(index string, query *Query) (docs []Doc, err error) {
 		}
 		return true
 	}
-	if len(query.hit.field) > 0 && len(query.hit.value) > 0 {
+	if query.hit.IsExist() {
 		// 走索引
 		err = c.store.ScanKV(index, toPath(query.hit.field, query.hit.value), handle)
 	} else {
@@ -185,4 +208,11 @@ func genID() string {
 
 func toPath(s ...string) string {
 	return strings.Join(s, "/")
+}
+
+func toDouble(s string) (float64, error) {
+	if !strings.Contains(s, ".") {
+		s = s + ".0"
+	}
+	return strconv.ParseFloat(s, 64)
 }

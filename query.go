@@ -1,9 +1,9 @@
 package kv2doc
 
 type Query struct {
-	limit       limit
 	expressions []expression
 	hit         hit
+	limit       limit
 }
 
 func NewQuery() *Query {
@@ -13,6 +13,10 @@ func NewQuery() *Query {
 type hit struct {
 	field string
 	value string
+}
+
+func (c *hit) IsExist() bool {
+	return len(c.field) > 0 && len(c.value) > 0
 }
 
 type limit struct {
@@ -38,58 +42,67 @@ func (c *Query) Limit(cursor, size int) *Query {
 }
 
 const eq = 1
-const like = 2
-const leftLike = 3
-const rightLike = 4
+const gt = 2
+const gte = 3
+const lt = 4
+const lte = 5
+const like = 6
+const leftLike = 7
+const rightLike = 8
 
 func (c *Query) Eq(field, value string) *Query {
-	if len(field) <= 0 || len(value) <= 0 {
-		return c
-	}
-	c.expressions = append(c.expressions, expression{
-		Left:   field,
-		Middle: eq,
-		Right:  value,
-	})
-	if len(c.hit.field) <= 0 {
-		c.hit.field = field
-		c.hit.value = value
-	}
+	c.add(eq, field, value)
+	return c
+}
+
+func (c *Query) Gt(field, value string) *Query {
+	c.add(gt, field, value)
+	return c
+}
+
+func (c *Query) Gte(field, value string) *Query {
+	c.add(gte, field, value)
+	return c
+}
+
+func (c *Query) Lt(field, value string) *Query {
+	c.add(lt, field, value)
+	return c
+}
+
+func (c *Query) Lte(field, value string) *Query {
+	c.add(lte, field, value)
 	return c
 }
 
 func (c *Query) Like(field, value string) *Query {
-	if len(field) <= 0 || len(value) <= 0 || field == primaryKey {
-		return c
-	}
-	c.expressions = append(c.expressions, expression{
-		Left:   field,
-		Middle: like,
-		Right:  value,
-	})
+	c.add(like, field, value)
 	return c
 }
 
 func (c *Query) LeftLike(field, value string) *Query {
-	if len(field) <= 0 || len(value) <= 0 || field == primaryKey {
-		return c
-	}
-	c.expressions = append(c.expressions, expression{
-		Left:   field,
-		Middle: leftLike,
-		Right:  value,
-	})
+	c.add(leftLike, field, value)
 	return c
 }
 
 func (c *Query) RightLike(field, value string) *Query {
-	if len(field) <= 0 || len(value) <= 0 || field == primaryKey {
-		return c
+	c.add(rightLike, field, value)
+	return c
+}
+
+func (c *Query) add(middle uint8, field, value string) {
+	if len(field) <= 0 || len(value) <= 0 {
+		return
 	}
 	c.expressions = append(c.expressions, expression{
 		Left:   field,
-		Middle: rightLike,
+		Middle: middle,
 		Right:  value,
 	})
-	return c
+	if middle == eq || middle == leftLike {
+		if !c.hit.IsExist() {
+			c.hit.field = field
+			c.hit.value = value
+		}
+	}
 }

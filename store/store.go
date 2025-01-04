@@ -8,7 +8,10 @@ type Store interface {
 }
 
 type KV struct {
-	Exist bool
 	Key   string
 	Value string
+}
+
+func (c KV) IsExist() bool {
+	return len(c.Key) > 0 && len(c.Value) > 0
 }
