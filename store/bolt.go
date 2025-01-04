@@ -59,10 +59,10 @@ func (c *Bolt) SetKV(table string, kvs []KV) error {
 		bucket := tx.Bucket([]byte(table))
 		if bucket != nil {
 			for _, v := range kvs {
-				if len(v.Key) <= 0 {
+				if !v.HasKey() {
 					continue
 				}
-				if len(v.Value) <= 0 {
+				if !v.HasValue() {
 					err := bucket.Delete([]byte(v.Key))
 					if err != nil {
 						return err

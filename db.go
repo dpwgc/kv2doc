@@ -79,7 +79,7 @@ func (c *DB) Update(table string, id string, doc Doc) (err error) {
 	if err != nil {
 		return err
 	}
-	if !kv.IsExist() {
+	if !kv.HasKey() {
 		return nil
 	}
 	old := Doc{}.fromBytes(kv.Value)
@@ -119,7 +119,7 @@ func (c *DB) Delete(table string, id string) (err error) {
 	if err != nil {
 		return err
 	}
-	if !kv.IsExist() {
+	if !kv.HasKey() {
 		return nil
 	}
 	old := Doc{}.fromBytes(kv.Value)
@@ -182,7 +182,7 @@ func (c *DB) baseSelect(table string, query *Query, justCount bool) (count int64
 		} else {
 			// 不是主键，那value就是文档id，要根据id获取文档内容
 			kv, _ := c.store.GetKV(table, toPath(primaryPrefix, primaryKey, string(value)))
-			if !kv.IsExist() {
+			if !kv.HasKey() {
 				return true
 			}
 			doc = doc.fromBytes(kv.Value)

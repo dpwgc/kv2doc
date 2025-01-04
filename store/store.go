@@ -14,6 +14,10 @@ type KV struct {
 	Value []byte
 }
 
-func (c KV) IsExist() bool {
-	return len(c.Key) > 0 && len(c.Value) > 0
+func (c KV) HasKey() bool {
+	return len(c.Key) > 0
+}
+
+func (c KV) HasValue() bool {
+	return len(c.Value) > 0
 }
