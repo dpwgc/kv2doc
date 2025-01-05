@@ -5,7 +5,7 @@ type Store interface {
 	DropTable(table string) (err error)
 	SetKV(table string, kvs []KV) (err error)
 	GetKV(table, key string) (kv KV, err error)
-	ScanKV(table, prefix string, handle func(key string, value []byte) bool) (err error)
+	ScanKV(table, prefix string, logic func(key string, value []byte) bool) (err error)
 	NextID(table string) (id string, err error)
 }
 

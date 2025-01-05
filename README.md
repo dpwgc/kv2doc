@@ -1,12 +1,13 @@
 # kv2doc
 
-## 一个简单的嵌入式文档数据库实现
+## 一个简单的嵌入式文档数据库实现，基于 Go + BoltDB
 
 ### 实现功能
 
 * 基本的表结构及文档数据插入/更新/删除
-* 暂时只支持 and 交集查询
-* 支持 Eq、Ne、Gt、Gte、Lt、Lte、Like、LeftLike、RightLike、In、NotIn 条件查询
+* 索引维护及查询（遵循最左前缀原则）
+* 简单的条件交集查询（Eq、Ne、Gt、Gte、Lt、Lte、Like、LeftLike、RightLike、In、NotIn、Exist、NotExist）
+* 允许自定义查询过滤逻辑和索引命中逻辑
 
 ***
 
@@ -94,7 +95,7 @@ func main() {
 
 #### 索引扫描：
 
-* 如果使用了 Eq（等于）或者 LeftLike（具有相同前缀的字符串），则会按最左前缀原则匹配索引
+* 如果使用了 Eq（等于）、 LeftLike（前缀相同）或者 In（数组内必须要有共同前缀才能走索引），会按最左前缀原则匹配索引
 
 * 例如：执行 LeftLike("title", "hello").Gt("type", "1")，会先利用 BoltDB 的 Cursor 遍历功能扫描所有前缀为 f/title/hello 的 key
 

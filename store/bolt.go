@@ -96,8 +96,8 @@ func (c *Bolt) GetKV(table, key string) (kv KV, err error) {
 	return kv, err
 }
 
-func (c *Bolt) ScanKV(table, prefix string, handle func(key string, value []byte) bool) error {
-	if len(table) <= 0 || handle == nil {
+func (c *Bolt) ScanKV(table, prefix string, logic func(key string, value []byte) bool) error {
+	if len(table) <= 0 || logic == nil {
 		return nil
 	}
 	return c.db.View(func(tx *bolt.Tx) error {
@@ -105,14 +105,14 @@ func (c *Bolt) ScanKV(table, prefix string, handle func(key string, value []byte
 			pbs := []byte(prefix)
 			cur := tx.Bucket([]byte(table)).Cursor()
 			for k, v := cur.Seek(pbs); k != nil && bytes.HasPrefix(k, pbs); k, v = cur.Next() {
-				if !handle(string(k), v) {
+				if !logic(string(k), v) {
 					return nil
 				}
 			}
 		} else {
 			cur := tx.Bucket([]byte(table)).Cursor()
 			for k, v := cur.First(); k != nil; k, v = cur.Next() {
-				if !handle(string(k), v) {
+				if !logic(string(k), v) {
 					return nil
 				}
 			}
