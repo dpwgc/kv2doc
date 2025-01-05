@@ -143,40 +143,18 @@ func (c *DB) Delete(table string, id string) (err error) {
 	return c.store.SetKV(table, kvs)
 }
 
-// SelectOne 查询文档（返回单个结果）
-func (c *DB) SelectOne(table string, query *Query) (docs Doc, err error) {
-	query.limit.enable = true
-	query.limit.size = 1
-	_, list, err := c.query(table, query, false)
-	if err != nil {
-		return nil, err
+// Select 查询文档
+func (c *DB) Select(table string) *Query {
+	return &Query{
+		db:    c,
+		table: table,
 	}
-	if len(list) <= 0 {
-		return nil, nil
-	}
-	return list[0], nil
 }
 
-// SelectList 查询文档（返回多个结果）
-func (c *DB) SelectList(table string, query *Query) (docs []Doc, err error) {
-	_, list, err := c.query(table, query, false)
-	if err != nil {
-		return nil, err
+func query(query Query, justCount bool) (count int64, docs []Doc, err error) {
+	if len(query.table) <= 0 || query.db == nil {
+		return 0, nil, nil
 	}
-	return list, nil
-}
-
-// SelectCount 统计文档数量
-func (c *DB) SelectCount(table string, query *Query) (int64, error) {
-	query.limit.enable = false
-	count, _, err := c.query(table, query, true)
-	if err != nil {
-		return 0, err
-	}
-	return count, nil
-}
-
-func (c *DB) query(table string, query *Query, justCount bool) (count int64, docs []Doc, err error) {
 	count = 0
 	cursor := 0
 	logic := func(key string, value []byte) bool {
@@ -193,7 +171,7 @@ func (c *DB) query(table string, query *Query, justCount bool) (count int64, doc
 			doc = doc.fromBytes(value)
 		} else {
 			// 不是主键，那value就是文档id，要根据id获取文档内容
-			kv, _ := c.store.GetKV(table, toPath(primaryPrefix, primaryKey, string(value)))
+			kv, _ := query.db.store.GetKV(query.table, toPath(primaryPrefix, primaryKey, string(value)))
 			if !kv.HasKey() {
 				return true
 			}
@@ -213,27 +191,27 @@ func (c *DB) query(table string, query *Query, justCount bool) (count int64, doc
 		}
 
 		for _, v := range query.conditions {
-			if v.Operator == eq && doc[v.Left] != v.Right[0] {
+			if v.Operator == eq && doc[v.Field] != v.Values[0] {
 				must = false
 			}
-			if v.Operator == ne && doc[v.Left] == v.Right[0] {
+			if v.Operator == ne && doc[v.Field] == v.Values[0] {
 				must = false
 			}
-			if v.Operator == leftLike && !strings.HasPrefix(doc[v.Left], v.Right[0]) {
+			if v.Operator == leftLike && !strings.HasPrefix(doc[v.Field], v.Values[0]) {
 				must = false
 			}
-			if v.Operator == rightLike && !strings.HasSuffix(doc[v.Left], v.Right[0]) {
+			if v.Operator == rightLike && !strings.HasSuffix(doc[v.Field], v.Values[0]) {
 				must = false
 			}
-			if v.Operator == like && !strings.HasPrefix(doc[v.Left], v.Right[0]) && !strings.HasSuffix(doc[v.Left], v.Right[0]) {
+			if v.Operator == like && !strings.HasPrefix(doc[v.Field], v.Values[0]) && !strings.HasSuffix(doc[v.Field], v.Values[0]) {
 				must = false
 			}
 			if v.Operator == gt || v.Operator == gte || v.Operator == lt || v.Operator == lte {
-				l, err := toDouble(doc[v.Left])
+				l, err := toDouble(doc[v.Field])
 				if err != nil {
 					must = false
 				}
-				r, err := toDouble(v.Right[0])
+				r, err := toDouble(v.Values[0])
 				if err != nil {
 					must = false
 				}
@@ -252,8 +230,8 @@ func (c *DB) query(table string, query *Query, justCount bool) (count int64, doc
 			}
 			if v.Operator == in {
 				has := false
-				for i := 0; i < len(v.Right); i++ {
-					if doc[v.Left] == v.Right[i] {
+				for i := 0; i < len(v.Values); i++ {
+					if doc[v.Field] == v.Values[i] {
 						has = true
 					}
 				}
@@ -263,8 +241,8 @@ func (c *DB) query(table string, query *Query, justCount bool) (count int64, doc
 			}
 			if v.Operator == notIn {
 				has := false
-				for i := 0; i < len(v.Right); i++ {
-					if doc[v.Left] == v.Right[i] {
+				for i := 0; i < len(v.Values); i++ {
+					if doc[v.Field] == v.Values[i] {
 						has = true
 					}
 				}
@@ -272,10 +250,10 @@ func (c *DB) query(table string, query *Query, justCount bool) (count int64, doc
 					must = false
 				}
 			}
-			if v.Operator == exist && len(doc[v.Left]) <= 0 {
+			if v.Operator == exist && len(doc[v.Field]) <= 0 {
 				must = false
 			}
-			if v.Operator == notExist && len(doc[v.Left]) > 0 {
+			if v.Operator == notExist && len(doc[v.Field]) > 0 {
 				must = false
 			}
 		}
@@ -295,10 +273,10 @@ func (c *DB) query(table string, query *Query, justCount bool) (count int64, doc
 	}
 	if query.hit.HasField() {
 		// 走索引
-		err = c.store.ScanKV(table, toPath(fieldPrefix, query.hit.field, query.hit.value), logic)
+		err = query.db.store.ScanKV(query.table, toPath(fieldPrefix, query.hit.field, query.hit.value), logic)
 	} else {
 		// 全表扫描
-		err = c.store.ScanKV(table, primaryPrefix, logic)
+		err = query.db.store.ScanKV(query.table, primaryPrefix, logic)
 	}
 	if err != nil {
 		return 0, nil, err
