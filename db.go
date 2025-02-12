@@ -146,8 +146,9 @@ func (c *DB) Delete(table string, id string) (err error) {
 // Select 查询文档
 func (c *DB) Select(table string) *Query {
 	return &Query{
-		db:    c,
-		table: table,
+		db:     c,
+		table:  table,
+		parser: NewParser(),
 	}
 }
 
@@ -186,7 +187,7 @@ func query(query Query, justCount bool) (count int64, docs []Doc, err error) {
 		must := true
 
 		// 自定义过滤逻辑
-		if query.customize != nil && !query.customize(doc) {
+		if query.filter != nil && !query.filter(doc) {
 			must = false
 		}
 

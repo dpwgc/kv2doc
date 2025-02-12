@@ -6,7 +6,8 @@ type Query struct {
 	conditions []condition
 	hit        hit
 	limit      limit
-	customize  func(doc Doc) bool
+	filter     func(doc Doc) bool
+	parser     *Parser
 }
 
 type hit struct {
@@ -151,8 +152,11 @@ func (c *Query) NotExist(field, value string) *Query {
 // Filter 自定义过滤逻辑，可以用这个方法来写一些复杂的 or/and 嵌套逻辑
 // 传入一个判断方法，入参是文档内容，返回值是bool
 // return true 则表明该文档符合查询条件，会将该文档加入到返回结果里
-func (c *Query) Filter(logic func(doc Doc) bool) *Query {
-	c.customize = logic
+func (c *Query) Filter(expr string) *Query {
+	c.filter = func(doc Doc) bool {
+		match, _ := c.parser.Match(expr, doc)
+		return match
+	}
 	return c
 }
 
