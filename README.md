@@ -67,15 +67,15 @@ func main() {
 	}
 
 	// 查看Query执行计划
-	expr, index := db.Query("test_table").
+	explain := db.Query("test_table").
 		Eq("type", "1").
 		Explain()
 
 	// 具体执行逻辑
-	fmt.Println("expr:", expr)
+	fmt.Println("expr:", explain.Expr)
 
 	// 选择了哪个索引
-	fmt.Println("index:", index)
+	fmt.Println("index:", explain.Index)
 }
 ```
 
