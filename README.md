@@ -14,12 +14,20 @@
 
 ### 使用示例
 
+* 安装
+
+```
+go get github.com/dpwgc/kv2doc
+```
+
+* 代码示例
+
 ```go
 package main
 
 import (
 	"fmt"
-	"kv2doc"
+	"github.com/dpwgc/kv2doc"
 )
 
 func main() {

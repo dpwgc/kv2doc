@@ -1,4 +1,4 @@
-module kv2doc
+module github.com/dpwgc/kv2doc
 
 go 1.21.4
 

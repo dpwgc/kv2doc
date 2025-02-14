@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"kv2doc"
+	"github.com/dpwgc/kv2doc"
 )
 
 func main() {

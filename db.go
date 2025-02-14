@@ -1,7 +1,7 @@
 package kv2doc
 
 import (
-	"kv2doc/store"
+	"github.com/dpwgc/kv2doc/store"
 	"strings"
 	"sync"
 )
