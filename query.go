@@ -275,7 +275,7 @@ func (c *Query) Count() (int64, error) {
 // Scroll 滚动查询
 func (c *Query) Scroll(fn func(doc Doc) bool) error {
 	cc := *c
-	return scroll(cc, fn)
+	return scan(cc, fn)
 }
 
 func (c *Query) selectIndex(operator uint8, field string, values ...string) {

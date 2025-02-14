@@ -8,7 +8,7 @@
 * 索引维护及查询（遵循最左前缀原则）
 * 简单的条件查询（Eq、Ne、Gt、Gte、Lt、Lte、Like、LeftLike、RightLike、In、NotIn、Exist）
 * 嵌套的条件查询（Must、Should）
-* 自定义排序规则与分页返回
+* 支持列表查询（排序+分页）与滚动查询
 
 ***
 

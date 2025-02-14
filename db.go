@@ -233,60 +233,26 @@ func (c *DB) Query(table string) *Query {
 
 // 普通查询
 func query(query Query, justCount bool) (count int64, docs []Doc, err error) {
-	if len(query.table) <= 0 || query.db == nil {
-		return 0, nil, nil
-	}
-	query.setFilter()
 	count = 0
 	cursor := 0
-	logic := func(key string, value []byte) bool {
-
+	// 扫描
+	err = scan(query, func(doc Doc) bool {
 		// 到达页数限制，且没有排序规则，结束检索
 		if query.orderBy == nil && query.limit.enable && len(docs) >= query.limit.size {
 			return false
 		}
-
-		doc := Doc{}
-
-		// 如果是主键，value就是文档内容，直接解析
-		if strings.HasPrefix(key, primaryPrefix) {
-			doc = doc.fromBytes(value)
+		// 如果还未到达指定游标（有排序规则时就不走这个了）
+		if query.orderBy == nil && query.limit.enable && query.limit.cursor > cursor {
+			cursor++
 		} else {
-			// 不是主键，那value就是文档id，要根据id获取文档内容
-			kv, _ := query.db.store.GetKV(query.table, toPath(primaryPrefix, primaryKey, string(value)))
-			if !kv.HasKey() {
-				return true
-			}
-			doc = doc.fromBytes(kv.Value)
-		}
-
-		// 跳过异常文档
-		if doc.isEmpty() || len(doc[primaryKey]) <= 0 {
-			return true
-		}
-
-		// 过滤逻辑
-		if query.filter(doc) {
-			// 如果还未到达指定游标（有排序规则时就不走这个了）
-			if query.orderBy == nil && query.limit.enable && query.limit.cursor > cursor {
-				cursor++
+			if justCount {
+				count++
 			} else {
-				if justCount {
-					count++
-				} else {
-					docs = append(docs, doc)
-				}
+				docs = append(docs, doc)
 			}
 		}
 		return true
-	}
-	if len(query.index.field) > 0 {
-		// 走索引
-		err = query.db.store.ScanKV(query.table, toPath(fieldPrefix, query.index.field, query.index.value), logic)
-	} else {
-		// 全表扫描
-		err = query.db.store.ScanKV(query.table, primaryPrefix, logic)
-	}
+	})
 	if err != nil {
 		return 0, nil, err
 	}
@@ -310,7 +276,7 @@ func query(query Query, justCount bool) (count int64, docs []Doc, err error) {
 }
 
 // 滚动查询
-func scroll(query Query, fn func(doc Doc) bool) (err error) {
+func scan(query Query, fn func(doc Doc) bool) (err error) {
 	if len(query.table) <= 0 || query.db == nil || fn == nil {
 		return nil
 	}
@@ -319,7 +285,19 @@ func scroll(query Query, fn func(doc Doc) bool) (err error) {
 		// 走索引
 		return query.db.store.ScanKV(query.table, toPath(fieldPrefix, query.index.field, query.index.value), func(key string, value []byte) bool {
 			doc := Doc{}
-			doc = doc.fromBytes(value)
+			kv, _ := query.db.store.GetKV(query.table, toPath(primaryPrefix, primaryKey, string(value)))
+			if !kv.HasKey() {
+				return true
+			}
+			doc = doc.fromBytes(kv.Value)
+			// 跳过异常文档
+			if doc.isEmpty() || len(doc[primaryKey]) <= 0 {
+				return true
+			}
+			// 过滤逻辑
+			if !query.filter(doc) {
+				return true
+			}
 			return fn(doc)
 		})
 	} else {
@@ -327,6 +305,14 @@ func scroll(query Query, fn func(doc Doc) bool) (err error) {
 		return query.db.store.ScanKV(query.table, primaryPrefix, func(key string, value []byte) bool {
 			doc := Doc{}
 			doc = doc.fromBytes(value)
+			// 跳过异常文档
+			if doc.isEmpty() || len(doc[primaryKey]) <= 0 {
+				return true
+			}
+			// 过滤逻辑
+			if !query.filter(doc) {
+				return true
+			}
 			return fn(doc)
 		})
 	}
