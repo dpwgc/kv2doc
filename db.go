@@ -186,9 +186,12 @@ func query(query Query, justCount bool) (count int64, docs []Doc, err error) {
 
 		must := true
 
-		// 自定义过滤逻辑
-		if query.filter != nil && !query.filter(doc) {
-			must = false
+		// 过滤逻辑
+		for _, filter := range query.filters {
+			if !filter(doc) {
+				must = false
+				break
+			}
 		}
 
 		for _, v := range query.conditions {

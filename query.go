@@ -1,12 +1,17 @@
 package kv2doc
 
+import (
+	"fmt"
+	"strings"
+)
+
 type Query struct {
 	db         *DB
 	table      string
 	conditions []condition
 	hit        hit
 	limit      limit
-	filter     func(doc Doc) bool
+	filters    []func(doc Doc) bool
 	parser     *Parser
 }
 
@@ -149,14 +154,24 @@ func (c *Query) NotExist(field, value string) *Query {
 	return c
 }
 
-// Filter 自定义过滤逻辑，可以用这个方法来写一些复杂的 or/and 嵌套逻辑
+// And 交集拼接
+func (c *Query) And(sc *SubQuery) *Query {
+	return c.addFilter(strings.Join(sc.expr, " && "))
+}
+
+// Or 并集拼接
+func (c *Query) Or(sc *SubQuery) *Query {
+	return c.addFilter(strings.Join(sc.expr, " || "))
+}
+
 // 传入一个判断方法，入参是文档内容，返回值是bool
 // return true 则表明该文档符合查询条件，会将该文档加入到返回结果里
-func (c *Query) Filter(expr string) *Query {
-	c.filter = func(doc Doc) bool {
+func (c *Query) addFilter(expr string) *Query {
+	fmt.Println("expr", expr)
+	c.filters = append(c.filters, func(doc Doc) bool {
 		match, _ := c.parser.Match(expr, doc)
 		return match
-	}
+	})
 	return c
 }
 
@@ -255,4 +270,111 @@ func getCommonPrefix(ss []string) (prefix string) {
 		}
 	}
 	return prefix
+}
+
+type SubQuery struct {
+	expr []string
+}
+
+func Sub() *SubQuery {
+	return &SubQuery{}
+}
+
+// Eq 等于
+func (c *SubQuery) Eq(field, value string) *SubQuery {
+	c.expr = append(c.expr, `(`+field+` == "`+value+`")`)
+	return c
+}
+
+// Ne 不等于
+func (c *SubQuery) Ne(field, value string) *SubQuery {
+	c.expr = append(c.expr, `(`+field+` != "`+value+`")`)
+	return c
+}
+
+// Gt 大于
+func (c *SubQuery) Gt(field, value string) *SubQuery {
+	c.expr = append(c.expr, `(float(`+field+`) > `+value+`)`)
+	return c
+}
+
+// Gte 大于或等于
+func (c *SubQuery) Gte(field, value string) *SubQuery {
+	c.expr = append(c.expr, `(float(`+field+`) >= `+value+`)`)
+	return c
+}
+
+// Lt 小于
+func (c *SubQuery) Lt(field, value string) *SubQuery {
+	c.expr = append(c.expr, `(float(`+field+`) < `+value+`)`)
+	return c
+}
+
+// Lte 小于或等于
+func (c *SubQuery) Lte(field, value string) *SubQuery {
+	c.expr = append(c.expr, `(float(`+field+`) <= `+value+`)`)
+	return c
+}
+
+// In 包含
+func (c *SubQuery) In(field string, values ...string) *SubQuery {
+	var els []string
+	for _, v := range values {
+		els = append(els, `(`+field+` == "`+v+`")`)
+	}
+	c.expr = append(c.expr, `(`+strings.Join(els, ` || `)+`)`)
+	return c
+}
+
+// NotIn 不包含
+func (c *SubQuery) NotIn(field string, values ...string) *SubQuery {
+	var els []string
+	for _, v := range values {
+		els = append(els, `(`+field+` != "`+v+`")`)
+	}
+	c.expr = append(c.expr, `(`+strings.Join(els, ` && `)+`)`)
+	return c
+}
+
+// Like 模糊匹配
+func (c *SubQuery) Like(field, value string) *SubQuery {
+	c.expr = append(c.expr, `(indexOf(`+field+`, "`+value+`") >= 0)`)
+	return c
+}
+
+// LeftLike 模糊匹配-具有相同的前缀
+// 此方法会走字段索引
+func (c *SubQuery) LeftLike(field, value string) *SubQuery {
+	c.expr = append(c.expr, `(hasPrefix(`+field+`, "`+value+`") == true)`)
+	return c
+}
+
+// RightLike 模糊匹配-具有相同的后缀
+func (c *SubQuery) RightLike(field, value string) *SubQuery {
+	c.expr = append(c.expr, `(hasSuffix(`+field+`, "`+value+`") == true)`)
+	return c
+}
+
+// Exist 存在该字段
+func (c *SubQuery) Exist(field string) *SubQuery {
+	c.expr = append(c.expr, `(len(`+field+`) > 0)`)
+	return c
+}
+
+// NotExist 不存在该字段
+func (c *SubQuery) NotExist(field string) *SubQuery {
+	c.expr = append(c.expr, `(len(`+field+`) <= 0)`)
+	return c
+}
+
+// And 交集拼接
+func (c *SubQuery) And(sc *SubQuery) *SubQuery {
+	c.expr = append(c.expr, `(`+strings.Join(sc.expr, ` && `)+`)`)
+	return c
+}
+
+// Or 并集拼接
+func (c *SubQuery) Or(sc *SubQuery) *SubQuery {
+	c.expr = append(c.expr, `(`+strings.Join(sc.expr, ` || `)+`)`)
+	return c
 }
