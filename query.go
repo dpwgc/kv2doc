@@ -1,7 +1,9 @@
 package kv2doc
 
 import (
+	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -13,6 +15,7 @@ type Query struct {
 	limit       limit
 	filter      func(doc Doc) bool
 	parser      *Parser
+	orderBy     func(l, r Doc) bool
 }
 
 type index struct {
@@ -156,6 +159,68 @@ func (c *Query) Must(sc *SubQuery) *Query {
 func (c *Query) Should(sc *SubQuery) *Query {
 	c.expressions = append(c.expressions, `(`+strings.Join(sc.expressions, " || ")+`)`)
 	return c
+}
+
+type SortRule int
+
+const (
+	Asc SortRule = iota
+	Desc
+)
+
+func (c *Query) Asc(fields ...string) *Query {
+	return c.Sort(Asc, fields...)
+}
+
+func (c *Query) Desc(fields ...string) *Query {
+	return c.Sort(Desc, fields...)
+}
+
+func (c *Query) Sort(rule SortRule, fields ...string) *Query {
+	c.orderBy = func(l, r Doc) bool {
+		for _, v := range fields {
+			if l[v] == r[v] {
+				continue
+			}
+			ld, le := toDouble(l[v])
+			rd, re := toDouble(r[v])
+			if le == nil && re == nil {
+				if rule == Asc {
+					if ld < rd {
+						return true
+					}
+				}
+				if rule == Desc {
+					if ld > rd {
+						return true
+					}
+				}
+			} else {
+				if rule == Asc {
+					if l[v] < r[v] {
+						return true
+					}
+				}
+				if rule == Desc {
+					if l[v] > r[v] {
+						return true
+					}
+				}
+			}
+		}
+		return false
+	}
+	return c
+}
+
+func toDouble(s string) (float64, error) {
+	if len(s) <= 0 {
+		return 0, errors.New("s is empty")
+	}
+	if !strings.Contains(s, ".") {
+		s = s + ".0"
+	}
+	return strconv.ParseFloat(s, 64)
 }
 
 // 传入一个判断方法，入参是文档内容，返回值是bool

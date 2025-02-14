@@ -27,9 +27,14 @@ func main() {
 		"color": "red",
 	})
 
-	// 查询文档，筛选条件：title 以 hello 为前缀, 并且 type 要大于 0 或者 存在 color 字段，结果集里取前10条返回
+	// 查询文档，筛选条件：title 以 hello 为前缀, 并且 type 要大于 0 或者 存在 color 字段，结果集按主键ID排序后，取前10条返回
 	// 使用 Eq 或 LeftLike 进行查询时，会走最左前缀索引，其他查询方法走全表扫描
-	documents, _ := db.Query("test_table").LeftLike("title", "hello").Should(kv2doc.Expr().Gt("type", "0").Exist("color")).Limit(0, 10).List()
+	documents, _ := db.Query("test_table").
+		LeftLike("title", "hello").
+		Should(kv2doc.Expr().Gt("type", "0").Exist("color")).
+		Desc("_id").
+		Limit(0, 10).
+		List()
 
 	// 打印查询结果
 	for _, v := range documents {

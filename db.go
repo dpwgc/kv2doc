@@ -184,6 +184,10 @@ const (
 )
 
 func (c *DB) Batch(table string, cmd ...BatchCommand) (ids []string, err error) {
+
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	var allKvs []store.KV
 	for _, v := range cmd {
 		if v.Type == Add {
@@ -237,8 +241,8 @@ func query(query Query, justCount bool) (count int64, docs []Doc, err error) {
 	cursor := 0
 	logic := func(key string, value []byte) bool {
 
-		// 到达页数限制，结束检索
-		if query.limit.enable && len(docs) >= query.limit.size {
+		// 到达页数限制，且没有排序规则，结束检索
+		if query.orderBy == nil && query.limit.enable && len(docs) >= query.limit.size {
 			return false
 		}
 
@@ -263,8 +267,8 @@ func query(query Query, justCount bool) (count int64, docs []Doc, err error) {
 
 		// 过滤逻辑
 		if query.filter(doc) {
-			// 如果还未到达指定游标
-			if query.limit.enable && query.limit.cursor > cursor {
+			// 如果还未到达指定游标（有排序规则时就不走这个了）
+			if query.orderBy == nil && query.limit.enable && query.limit.cursor > cursor {
 				cursor++
 			} else {
 				if justCount {
@@ -285,6 +289,22 @@ func query(query Query, justCount bool) (count int64, docs []Doc, err error) {
 	}
 	if err != nil {
 		return 0, nil, err
+	}
+	// 最终排序
+	if query.orderBy != nil && len(docs) > 0 {
+		Sort(docs, query.orderBy)
+		start := query.limit.cursor
+		end := start + query.limit.size
+		var sorted []Doc
+		for i := 0; i < len(docs); i++ {
+			if i >= start && i < end {
+				sorted = append(sorted, docs[i])
+			}
+			if i >= end {
+				break
+			}
+		}
+		return count, sorted, nil
 	}
 	return count, docs, nil
 }
