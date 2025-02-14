@@ -12,9 +12,8 @@ type Query struct {
 	expressions []string
 	index       Index
 	limit       limit
-	filter      func(doc Doc) bool
 	parser      *Parser
-	orderBy     func(l, r Doc) bool
+	sort        func(l, r Doc) bool
 }
 
 type Index struct {
@@ -135,18 +134,21 @@ func (c *Query) RightLike(field, value string) *Query {
 
 // Exist 存在该字段
 func (c *Query) Exist(field string) *Query {
-	c.expressions = append(c.expressions, `(`+field+` != nil && len(`+field+`) > 0)`)
+	if field != primaryKey && field != createdAt && field != updatedAt {
+		c.expressions = append(c.expressions, `(indexOf(_fields, "/`+field+`") >= 0)`)
+	}
 	return c
 }
 
 // NotExist 不存在该字段
-// TODO
-/*
 func (c *Query) NotExist(field string) *Query {
-	c.expressions = append(c.expressions, `(`+field+` == nil || len(`+field+`) <= 0)`)
+	if field != primaryKey && field != createdAt && field != updatedAt {
+		c.expressions = append(c.expressions, `(indexOf(_fields, "/`+field+`") < 0)`)
+	} else {
+		c.expressions = append(c.expressions, `(false)`)
+	}
 	return c
 }
-*/
 
 // Must 交集拼接
 func (c *Query) Must(sc *SubQuery) *Query {
@@ -176,7 +178,7 @@ func (c *Query) Desc(fields ...string) *Query {
 }
 
 func (c *Query) Sort(rule SortRule, fields ...string) *Query {
-	c.orderBy = func(l, r Doc) bool {
+	c.sort = func(l, r Doc) bool {
 		for _, v := range fields {
 			if l[v] == r[v] {
 				continue
@@ -222,16 +224,6 @@ func toDouble(s string) (float64, error) {
 	return strconv.ParseFloat(s, 64)
 }
 
-// 传入一个判断方法，入参是文档内容，返回值是bool
-// return true 则表明该文档符合查询条件，会将该文档加入到返回结果里
-func (c *Query) setFilter() *Query {
-	c.filter = func(doc Doc) bool {
-		match, _ := c.parser.Match(strings.Join(c.expressions, " && "), doc)
-		return match
-	}
-	return c
-}
-
 // One 查询单个文档
 func (c *Query) One() (doc Doc, err error) {
 	cc := *c
@@ -247,25 +239,19 @@ func (c *Query) One() (doc Doc, err error) {
 	return list[0], nil
 }
 
-// List 查询多个文档
+// List 返回多个文档
 func (c *Query) List() (docs []Doc, err error) {
 	cc := *c
-	_, list, err := query(cc, false)
-	if err != nil {
-		return nil, err
-	}
-	return list, nil
+	_, docs, err = query(cc, false)
+	return docs, err
 }
 
-// Count 文档数量统计
-func (c *Query) Count() (int64, error) {
+// Count 返回文档数量
+func (c *Query) Count() (count int64, err error) {
 	cc := *c
 	cc.limit.enable = false
-	count, _, err := query(cc, true)
-	if err != nil {
-		return 0, err
-	}
-	return count, nil
+	count, _, err = query(cc, true)
+	return count, err
 }
 
 // Scroll 滚动查询
@@ -428,18 +414,21 @@ func (c *SubQuery) RightLike(field, value string) *SubQuery {
 
 // Exist 存在该字段
 func (c *SubQuery) Exist(field string) *SubQuery {
-	c.expressions = append(c.expressions, `(`+field+` != nil && len(`+field+`) > 0)`)
+	if field != primaryKey && field != createdAt && field != updatedAt {
+		c.expressions = append(c.expressions, `(indexOf(_fields, "/`+field+`") >= 0)`)
+	}
 	return c
 }
 
 // NotExist 不存在该字段
-// TODO
-/*
 func (c *SubQuery) NotExist(field string) *SubQuery {
-	c.expressions = append(c.expressions, `(`+field+` == nil || len(`+field+`) <= 0)`)
+	if field != primaryKey && field != createdAt && field != updatedAt {
+		c.expressions = append(c.expressions, `(indexOf(_fields, "/`+field+`") < 0)`)
+	} else {
+		c.expressions = append(c.expressions, `(false)`)
+	}
 	return c
 }
-*/
 
 // Must 交集拼接
 func (c *SubQuery) Must(sc *SubQuery) *SubQuery {

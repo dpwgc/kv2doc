@@ -4,10 +4,10 @@
 
 ### 实现功能
 
-* 基本的表结构及文档数据插入/更新/删除/批量操作
-* 索引维护及查询（遵循最左前缀原则）
-* 简单的条件查询（Eq、Ne、Gt、Gte、Lt、Lte、Like、LeftLike、RightLike、In、NotIn、Exist）
-* 嵌套的条件查询（Must、Should）
+* 支持基本的表结构及文档数据插入/更新/删除/批量增删改操作（Add、Remove、Edit）
+* 支持索引维护及查询（遵循最左前缀原则）
+* 支持简单的条件查询（Eq、Ne、Gt、Gte、Lt、Lte、Like、LeftLike、RightLike、In、NotIn、Exist、NotExist）
+* 支持复杂嵌套查询（Must、Should）
 * 支持列表查询（排序+分页）与滚动查询
 
 ***
@@ -63,12 +63,13 @@ func main() {
 
 	// 打印查询结果
 	for _, v := range documents {
-		fmt.Println(v)
+		fmt.Println(v.ID(), v, v.Created())
 	}
 
 	// 查看Query执行计划
 	explain := db.Query("test_table").
-		Eq("type", "1").
+		LeftLike("title", "hello").
+		Should(kv2doc.Expr().Gt("type", "0").Exist("color")).
 		Explain()
 
 	// 具体执行逻辑

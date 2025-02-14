@@ -2,13 +2,18 @@ package kv2doc
 
 import (
 	"errors"
+	"fmt"
 	"github.com/dpwgc/kv2doc/store"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
 	primaryKey    = "_id"
+	createdAt     = "_created"
+	updatedAt     = "_updated"
+	fields        = "_fields"
 	primaryPrefix = "p"
 	fieldPrefix   = "f"
 )
@@ -37,6 +42,14 @@ func ByStore(store store.Store) *DB {
 
 // Drop 删除指定表
 func (c *DB) Drop(table string) error {
+
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	if len(table) <= 0 {
+		return errors.New("parameter error")
+	}
+
 	return c.store.DropTable(table)
 }
 
@@ -59,7 +72,7 @@ func (c *DB) Add(table string, doc Doc) (id string, err error) {
 }
 
 func (c *DB) add(table string, doc Doc) (kvs []store.KV, id string, err error) {
-	if len(table) <= 0 && len(doc) <= 0 {
+	if len(table) <= 0 && !doc.isValid() {
 		return nil, "", errors.New("parameter error")
 	}
 	err = c.store.CreateTable(table)
@@ -73,6 +86,9 @@ func (c *DB) add(table string, doc Doc) (kvs []store.KV, id string, err error) {
 	}
 
 	doc[primaryKey] = id
+	doc[updatedAt] = fmt.Sprintf("%v", time.Now().UnixMilli())
+	doc[createdAt] = doc[updatedAt]
+	doc[fields] = "/" + toPath(doc.fields()...)
 	kvs = append(kvs, store.KV{
 		Key:   toPath(primaryPrefix, primaryKey, id),
 		Value: doc.toBytes(),
@@ -102,7 +118,7 @@ func (c *DB) Edit(table string, id string, doc Doc) (err error) {
 }
 
 func (c *DB) edit(table string, id string, doc Doc) (kvs []store.KV, err error) {
-	if len(table) <= 0 && len(id) <= 0 && len(doc) <= 0 {
+	if len(table) <= 0 && len(id) <= 0 && !doc.isValid() {
 		return nil, errors.New("parameter error")
 	}
 	// 获取老的文档
@@ -116,6 +132,9 @@ func (c *DB) edit(table string, id string, doc Doc) (kvs []store.KV, err error) 
 	old := Doc{}.fromBytes(kv.Value)
 
 	doc[primaryKey] = id
+	doc[updatedAt] = fmt.Sprintf("%v", time.Now().UnixMilli())
+	doc[createdAt] = old[createdAt]
+	doc[fields] = "/" + toPath(doc.fields()...)
 	kvs = append(kvs, store.KV{
 		Key:   toPath(primaryPrefix, primaryKey, id),
 		Value: doc.toBytes(),
@@ -242,18 +261,18 @@ func (c *DB) Query(table string) *Query {
 	}
 }
 
-// 普通查询
+// 查询
 func query(query Query, justCount bool) (count int64, docs []Doc, err error) {
 	count = 0
 	cursor := 0
 	// 扫描
 	err = scan(query, func(doc Doc) bool {
 		// 到达页数限制，且没有排序规则，结束检索
-		if query.orderBy == nil && query.limit.enable && len(docs) >= query.limit.size {
+		if query.sort == nil && query.limit.enable && len(docs) >= query.limit.size {
 			return false
 		}
 		// 如果还未到达指定游标（有排序规则时就不走这个了）
-		if query.orderBy == nil && query.limit.enable && query.limit.cursor > cursor {
+		if query.sort == nil && query.limit.enable && query.limit.cursor > cursor {
 			cursor++
 		} else {
 			if justCount {
@@ -268,8 +287,8 @@ func query(query Query, justCount bool) (count int64, docs []Doc, err error) {
 		return 0, nil, err
 	}
 	// 最终排序
-	if query.orderBy != nil && len(docs) > 0 {
-		Sort(docs, query.orderBy)
+	if query.sort != nil && len(docs) > 0 {
+		Sort(docs, query.sort)
 		start := query.limit.cursor
 		end := start + query.limit.size
 		var sorted []Doc
@@ -286,12 +305,12 @@ func query(query Query, justCount bool) (count int64, docs []Doc, err error) {
 	return count, docs, nil
 }
 
-// 滚动查询
+// 扫描
 func scan(query Query, fn func(doc Doc) bool) (err error) {
 	if len(query.table) <= 0 || query.db == nil || fn == nil {
-		return nil
+		return errors.New("parameter error")
 	}
-	query.setFilter()
+	filter := getFilter(query.expressions, query.parser)
 	if len(query.index.field) > 0 {
 		// 走索引
 		return query.db.store.ScanKV(query.table, toPath(fieldPrefix, query.index.field, query.index.value), func(key string, value []byte) bool {
@@ -302,11 +321,11 @@ func scan(query Query, fn func(doc Doc) bool) (err error) {
 			}
 			doc = doc.fromBytes(kv.Value)
 			// 跳过异常文档
-			if doc.isEmpty() || len(doc[primaryKey]) <= 0 {
+			if !doc.isValid() || len(doc[primaryKey]) <= 0 {
 				return true
 			}
 			// 过滤逻辑
-			if !query.filter(doc) {
+			if filter != nil && !filter(doc) {
 				return true
 			}
 			return fn(doc)
@@ -317,16 +336,26 @@ func scan(query Query, fn func(doc Doc) bool) (err error) {
 			doc := Doc{}
 			doc = doc.fromBytes(value)
 			// 跳过异常文档
-			if doc.isEmpty() || len(doc[primaryKey]) <= 0 {
+			if !doc.isValid() || len(doc[primaryKey]) <= 0 {
 				return true
 			}
 			// 过滤逻辑
-			if !query.filter(doc) {
+			if filter != nil && !filter(doc) {
 				return true
 			}
 			return fn(doc)
 		})
 	}
+}
+
+func getFilter(expressions []string, parser *Parser) func(doc Doc) bool {
+	if len(expressions) > 0 {
+		return func(doc Doc) bool {
+			match, _ := parser.Match(strings.Join(expressions, " && "), doc)
+			return match
+		}
+	}
+	return nil
 }
 
 func toPath(s ...string) string {

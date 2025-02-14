@@ -38,12 +38,13 @@ func main() {
 
 	// 打印查询结果
 	for _, v := range documents {
-		fmt.Println(v)
+		fmt.Println(v.ID(), v, v.Created())
 	}
 
 	// 查看Query执行计划
 	explain := db.Query("test_table").
-		Eq("type", "1").
+		LeftLike("title", "hello").
+		Should(kv2doc.Expr().Gt("type", "0").Exist("color")).
 		Explain()
 
 	// 具体执行逻辑
