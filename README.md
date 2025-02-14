@@ -61,19 +61,21 @@ func main() {
 		Limit(0, 10).
 		List()
 
-	// 查看Query执行计划
-	explain := db.Query("test_table").
-		Eq("type", "1").
-		Explain()
-	// 具体执行逻辑
-	fmt.Println("Expression:", explain.Expr)
-	// 选择了哪个索引
-	fmt.Println("Index:", explain.Index)
-
 	// 打印查询结果
 	for _, v := range documents {
 		fmt.Println(v)
 	}
+
+	// 查看Query执行计划
+	expr, index := db.Query("test_table").
+		Eq("type", "1").
+		Explain()
+
+	// 具体执行逻辑
+	fmt.Println("expr:", expr)
+
+	// 选择了哪个索引
+	fmt.Println("index:", index)
 }
 ```
 

@@ -1,6 +1,7 @@
 package kv2doc
 
 import (
+	"errors"
 	"github.com/dpwgc/kv2doc/store"
 	"strings"
 	"sync"
@@ -58,6 +59,9 @@ func (c *DB) Add(table string, doc Doc) (id string, err error) {
 }
 
 func (c *DB) add(table string, doc Doc) (kvs []store.KV, id string, err error) {
+	if len(table) <= 0 && len(doc) <= 0 {
+		return nil, "", errors.New("parameter error")
+	}
 	err = c.store.CreateTable(table)
 	if err != nil {
 		return nil, "", err
@@ -98,6 +102,9 @@ func (c *DB) Edit(table string, id string, doc Doc) (err error) {
 }
 
 func (c *DB) edit(table string, id string, doc Doc) (kvs []store.KV, err error) {
+	if len(table) <= 0 && len(id) <= 0 && len(doc) <= 0 {
+		return nil, errors.New("parameter error")
+	}
 	// 获取老的文档
 	kv, err := c.store.GetKV(table, toPath(primaryPrefix, primaryKey, id))
 	if err != nil {
@@ -149,6 +156,9 @@ func (c *DB) Remove(table string, id string) (err error) {
 }
 
 func (c *DB) remove(table string, id string) (kvs []store.KV, err error) {
+	if len(table) <= 0 && len(id) <= 0 {
+		return nil, errors.New("parameter error")
+	}
 	kv, err := c.store.GetKV(table, toPath(primaryPrefix, primaryKey, id))
 	if err != nil {
 		return nil, err
@@ -169,28 +179,29 @@ func (c *DB) remove(table string, id string) (kvs []store.KV, err error) {
 	return nil, nil
 }
 
-type Cmd struct {
+type Command struct {
 	Id       string
 	Document Doc
-	Type     CmdType
+	Action   Action
 }
 
-type CmdType int
+type Action int
 
 const (
-	Add CmdType = iota
+	Add Action = iota
 	Edit
 	Remove
 )
 
-func (c *DB) Batch(table string, cmd ...Cmd) (ids []string, err error) {
+// Bulk 批量操作
+func (c *DB) Bulk(table string, cs ...Command) (ids []string, err error) {
 
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
 	var allKvs []store.KV
-	for _, v := range cmd {
-		if v.Type == Add {
+	for _, v := range cs {
+		if v.Action == Add {
 			kvs, id, err := c.add(table, v.Document)
 			if err != nil {
 				return nil, err
@@ -198,7 +209,7 @@ func (c *DB) Batch(table string, cmd ...Cmd) (ids []string, err error) {
 			allKvs = append(allKvs, kvs...)
 			ids = append(ids, id)
 		}
-		if v.Type == Edit {
+		if v.Action == Edit {
 			kvs, err := c.edit(table, v.Id, v.Document)
 			if err != nil {
 				return nil, err
@@ -206,7 +217,7 @@ func (c *DB) Batch(table string, cmd ...Cmd) (ids []string, err error) {
 			allKvs = append(allKvs, kvs...)
 			ids = append(ids, v.Id)
 		}
-		if v.Type == Remove {
+		if v.Action == Remove {
 			kvs, err := c.remove(table, v.Id)
 			if err != nil {
 				return nil, err
