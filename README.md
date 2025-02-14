@@ -6,7 +6,8 @@
 
 * 基本的表结构及文档数据插入/更新/删除
 * 索引维护及查询（遵循最左前缀原则）
-* 简单的条件交集查询（Eq、Ne、Gt、Gte、Lt、Lte、Like、LeftLike、RightLike、In、NotIn、Exist、NotExist）
+* 简单的条件查询（Eq、Ne、Gt、Gte、Lt、Lte、Like、LeftLike、RightLike、In、NotIn、Exist）
+* 嵌套的条件查询（Must、Should）
 * 允许自定义查询过滤逻辑和索引命中逻辑
 
 ***
@@ -27,25 +28,25 @@ func main() {
 	db, _ := kv2doc.NewDB("demo.db")
 
 	// 往 test_table 表中插入2条数据（无需建表，插入数据时会自动建表，同时为每一个字段都建立索引）
-	_, _ = db.Insert("test_table", kv2doc.Doc{
+	_, _ = db.Add("test_table", kv2doc.Doc{
 		"title": "hello world 1",
 		"type":  "1",
 	})
-	id, _ := db.Insert("test_table", kv2doc.Doc{
+	id, _ := db.Add("test_table", kv2doc.Doc{
 		"title": "hello world 2",
 		"type":  "2",
 	})
 
 	// 更新第2条数据，新增一个 color 字段
-	_ = db.Update("test_table", id, kv2doc.Doc{
+	_ = db.Edit("test_table", id, kv2doc.Doc{
 		"title": "hello world 2",
 		"type":  "2",
 		"color": "red",
 	})
 
-	// 查询文档，筛选条件：title 以 hello 为前缀，并且 type 要大于 1，结果集里取前10条返回
+	// 查询文档，筛选条件：title 以 hello 为前缀, 并且 type 要大于 0 或者 存在 color 字段，结果集里取前10条返回
 	// 使用 Eq 或 LeftLike 进行查询时，会走最左前缀索引，其他查询方法走全表扫描
-	documents, _ := db.Select("test_table").LeftLike("title", "hello").Gt("type", "1").Limit(0, 10).List()
+	documents, _ := db.Query("test_table").LeftLike("title", "hello").Should(kv2doc.Expr().Gt("type", "0").Exist("color")).Limit(0, 10).List()
 
 	// 打印查询结果
 	for _, v := range documents {
@@ -98,33 +99,9 @@ func main() {
 
 * 然后再根据该索引扫描的结果作其他条件筛选（先根据字段索引 value 中的主键 id 找到文档内容，再判断文档中的 type 字段是否大于 1）
 
-```
-LeftLike("title", "hello").Gt("type", "1")
-->
-ScanBoltDB("f/title/hello") get _id
-->
-doc = getByID("xxx")
-->
-if doc["type"] > 1
-->
-hit
-```
-
 #### 全表扫描：
 
-* 当全表扫描时，会在 BoltDB 中扫描所有前缀为 p 的 key（即所有存放文档内容的主键 key）,然后再根据文档内容进行匹配
-
-* 例如：执行 Lt("type", "3")
-
-```
-Lt("type", "3")
-->
-ScanBoltDB("p") get doc
-->
-if doc["type"] < 3 
-->
-hit
-```
+* 当全表扫描时，会在 BoltDB 中扫描所有前缀为 p 的 key（即所有存放文档内容的主键 key）,然后再根据文档内容逐条匹配
 
 ***
 

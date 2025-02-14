@@ -2,14 +2,15 @@ package kv2doc
 
 import (
 	"kv2doc/store"
-	"strconv"
 	"strings"
 	"sync"
 )
 
-const primaryKey = "_id"
-const primaryPrefix = "p"
-const fieldPrefix = "f"
+const (
+	primaryKey    = "_id"
+	primaryPrefix = "p"
+	fieldPrefix   = "f"
+)
 
 type DB struct {
 	store store.Store
@@ -38,24 +39,36 @@ func (c *DB) Drop(table string) error {
 	return c.store.DropTable(table)
 }
 
-// Insert 在指定表中插入文档记录（表不存在时自动建表）
-func (c *DB) Insert(table string, doc Doc) (id string, err error) {
+// Add 在指定表中插入文档记录（表不存在时自动建表）
+func (c *DB) Add(table string, doc Doc) (id string, err error) {
 
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	err = c.store.CreateTable(table)
+	kvs, id, err := c.add(table, doc)
 	if err != nil {
 		return "", err
+	}
+
+	err = c.store.SetKV(table, kvs)
+	if err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func (c *DB) add(table string, doc Doc) (kvs []store.KV, id string, err error) {
+	err = c.store.CreateTable(table)
+	if err != nil {
+		return nil, "", err
 	}
 
 	id, err = c.store.NextID(table)
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
 
 	doc[primaryKey] = id
-	var kvs []store.KV
 	kvs = append(kvs, store.KV{
 		Key:   toPath(primaryPrefix, primaryKey, id),
 		Value: doc.toBytes(),
@@ -66,32 +79,36 @@ func (c *DB) Insert(table string, doc Doc) (id string, err error) {
 			Value: []byte(id),
 		})
 	}
-	err = c.store.SetKV(table, kvs)
-	if err != nil {
-		return "", err
-	}
-	return id, nil
+	return kvs, id, nil
 }
 
-// Update 更新指定表中的指定文档记录
-// id 为文档主键 ID，在 Insert 文档记录时会返回
-func (c *DB) Update(table string, id string, doc Doc) (err error) {
+// Edit 更新指定表中的指定文档记录
+// id 为文档主键 ID，在 Add 文档记录时会返回
+func (c *DB) Edit(table string, id string, doc Doc) (err error) {
 
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	// 获取老的文档
-	kv, err := c.store.GetKV(table, toPath(primaryPrefix, primaryKey, id))
+	kvs, err := c.edit(table, id, doc)
 	if err != nil {
 		return err
 	}
+
+	return c.store.SetKV(table, kvs)
+}
+
+func (c *DB) edit(table string, id string, doc Doc) (kvs []store.KV, err error) {
+	// 获取老的文档
+	kv, err := c.store.GetKV(table, toPath(primaryPrefix, primaryKey, id))
+	if err != nil {
+		return nil, err
+	}
 	if !kv.HasKey() {
-		return nil
+		return nil, nil
 	}
 	old := Doc{}.fromBytes(kv.Value)
 
 	doc[primaryKey] = id
-	var kvs []store.KV
 	kvs = append(kvs, store.KV{
 		Key:   toPath(primaryPrefix, primaryKey, id),
 		Value: doc.toBytes(),
@@ -113,25 +130,34 @@ func (c *DB) Update(table string, id string, doc Doc) (err error) {
 			Value: []byte(id),
 		})
 	}
-	return c.store.SetKV(table, kvs)
+
+	return kvs, nil
 }
 
-// Delete 删除指定表中的指定文档记录
-func (c *DB) Delete(table string, id string) (err error) {
+// Remove 删除指定表中的指定文档记录
+func (c *DB) Remove(table string, id string) (err error) {
 
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	kv, err := c.store.GetKV(table, toPath(primaryPrefix, primaryKey, id))
+	kvs, err := c.remove(table, id)
 	if err != nil {
 		return err
 	}
+
+	return c.store.SetKV(table, kvs)
+}
+
+func (c *DB) remove(table string, id string) (kvs []store.KV, err error) {
+	kv, err := c.store.GetKV(table, toPath(primaryPrefix, primaryKey, id))
+	if err != nil {
+		return nil, err
+	}
 	if !kv.HasKey() {
-		return nil
+		return nil, nil
 	}
 	old := Doc{}.fromBytes(kv.Value)
 
-	var kvs []store.KV
 	kvs = append(kvs, store.KV{
 		Key: toPath(primaryPrefix, primaryKey, id),
 	})
@@ -140,11 +166,60 @@ func (c *DB) Delete(table string, id string) (err error) {
 			Key: toPath(fieldPrefix, k, v, old[primaryKey]),
 		})
 	}
-	return c.store.SetKV(table, kvs)
+	return nil, nil
 }
 
-// Select 查询文档
-func (c *DB) Select(table string) *Query {
+type BatchCommand struct {
+	Id       string
+	Document Doc
+	Type     CmdType
+}
+
+type CmdType int
+
+const (
+	Add CmdType = iota
+	Edit
+	Remove
+)
+
+func (c *DB) Batch(table string, cmd ...BatchCommand) (ids []string, err error) {
+	var allKvs []store.KV
+	for _, v := range cmd {
+		if v.Type == Add {
+			kvs, id, err := c.add(table, v.Document)
+			if err != nil {
+				return nil, err
+			}
+			allKvs = append(allKvs, kvs...)
+			ids = append(ids, id)
+		}
+		if v.Type == Edit {
+			kvs, err := c.edit(table, v.Id, v.Document)
+			if err != nil {
+				return nil, err
+			}
+			allKvs = append(allKvs, kvs...)
+			ids = append(ids, v.Id)
+		}
+		if v.Type == Remove {
+			kvs, err := c.remove(table, v.Id)
+			if err != nil {
+				return nil, err
+			}
+			allKvs = append(allKvs, kvs...)
+			ids = append(ids, v.Id)
+		}
+	}
+	err = c.store.SetKV(table, allKvs)
+	if err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+// Query 查询文档
+func (c *DB) Query(table string) *Query {
 	return &Query{
 		db:     c,
 		table:  table,
@@ -156,6 +231,7 @@ func query(query Query, justCount bool) (count int64, docs []Doc, err error) {
 	if len(query.table) <= 0 || query.db == nil {
 		return 0, nil, nil
 	}
+	query.setFilter()
 	count = 0
 	cursor := 0
 	logic := func(key string, value []byte) bool {
@@ -184,84 +260,8 @@ func query(query Query, justCount bool) (count int64, docs []Doc, err error) {
 			return true
 		}
 
-		must := true
-
 		// 过滤逻辑
-		for _, filter := range query.filters {
-			if !filter(doc) {
-				must = false
-				break
-			}
-		}
-
-		for _, v := range query.conditions {
-			if v.Operator == eq && doc[v.Field] != v.Values[0] {
-				must = false
-			}
-			if v.Operator == ne && doc[v.Field] == v.Values[0] {
-				must = false
-			}
-			if v.Operator == leftLike && !strings.HasPrefix(doc[v.Field], v.Values[0]) {
-				must = false
-			}
-			if v.Operator == rightLike && !strings.HasSuffix(doc[v.Field], v.Values[0]) {
-				must = false
-			}
-			if v.Operator == like && !strings.HasPrefix(doc[v.Field], v.Values[0]) && !strings.HasSuffix(doc[v.Field], v.Values[0]) {
-				must = false
-			}
-			if v.Operator == gt || v.Operator == gte || v.Operator == lt || v.Operator == lte {
-				l, err := toDouble(doc[v.Field])
-				if err != nil {
-					must = false
-				}
-				r, err := toDouble(v.Values[0])
-				if err != nil {
-					must = false
-				}
-				if v.Operator == gt && !(l > r) {
-					must = false
-				}
-				if v.Operator == gte && !(l >= r) {
-					must = false
-				}
-				if v.Operator == lt && !(l < r) {
-					must = false
-				}
-				if v.Operator == lte && !(l <= r) {
-					must = false
-				}
-			}
-			if v.Operator == in {
-				has := false
-				for i := 0; i < len(v.Values); i++ {
-					if doc[v.Field] == v.Values[i] {
-						has = true
-					}
-				}
-				if !has {
-					must = false
-				}
-			}
-			if v.Operator == notIn {
-				has := false
-				for i := 0; i < len(v.Values); i++ {
-					if doc[v.Field] == v.Values[i] {
-						has = true
-					}
-				}
-				if has {
-					must = false
-				}
-			}
-			if v.Operator == exist && len(doc[v.Field]) <= 0 {
-				must = false
-			}
-			if v.Operator == notExist && len(doc[v.Field]) > 0 {
-				must = false
-			}
-		}
-		if must {
+		if query.filter(doc) {
 			// 如果还未到达指定游标
 			if query.limit.enable && query.limit.cursor > cursor {
 				cursor++
@@ -275,9 +275,9 @@ func query(query Query, justCount bool) (count int64, docs []Doc, err error) {
 		}
 		return true
 	}
-	if query.hit.HasField() {
+	if len(query.index.field) > 0 {
 		// 走索引
-		err = query.db.store.ScanKV(query.table, toPath(fieldPrefix, query.hit.field, query.hit.value), logic)
+		err = query.db.store.ScanKV(query.table, toPath(fieldPrefix, query.index.field, query.index.value), logic)
 	} else {
 		// 全表扫描
 		err = query.db.store.ScanKV(query.table, primaryPrefix, logic)
@@ -288,13 +288,15 @@ func query(query Query, justCount bool) (count int64, docs []Doc, err error) {
 	return count, docs, nil
 }
 
-func toPath(s ...string) string {
-	return strings.Join(s, "/")
+// Scroll 滚动扫描全表
+func (c *DB) Scroll(table string, fn func(doc Doc) bool) (err error) {
+	return c.store.ScanKV(table, primaryPrefix, func(key string, value []byte) bool {
+		doc := Doc{}
+		doc = doc.fromBytes(value)
+		return fn(doc)
+	})
 }
 
-func toDouble(s string) (float64, error) {
-	if !strings.Contains(s, ".") {
-		s = s + ".0"
-	}
-	return strconv.ParseFloat(s, 64)
+func toPath(s ...string) string {
+	return strings.Join(s, "/")
 }

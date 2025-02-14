@@ -6,38 +6,24 @@ import (
 )
 
 type Query struct {
-	db         *DB
-	table      string
-	conditions []condition
-	hit        hit
-	limit      limit
-	filters    []func(doc Doc) bool
-	parser     *Parser
+	db          *DB
+	table       string
+	expressions []string
+	index       index
+	limit       limit
+	filter      func(doc Doc) bool
+	parser      *Parser
 }
 
-type hit struct {
+type index struct {
 	field string
 	value string
-}
-
-func (c *hit) HasField() bool {
-	return len(c.field) > 0
-}
-
-func (c *hit) HasValue() bool {
-	return len(c.value) > 0
 }
 
 type limit struct {
 	enable bool
 	cursor int
 	size   int
-}
-
-type condition struct {
-	Field    string
-	Operator uint8
-	Values   []string
 }
 
 // Limit 分页方法，逻辑和 MySQL 的 Limit 相同，limit 10 或 limit 0,10
@@ -61,117 +47,127 @@ func (c *Query) Limit(values ...int) *Query {
 	return c
 }
 
-const eq = 1
-const ne = 2
-const in = 3
-const notIn = 4
-const gt = 5
-const gte = 6
-const lt = 7
-const lte = 8
-const like = 9
-const leftLike = 10
-const rightLike = 11
-const exist = 12
-const notExist = 13
+const (
+	eq = iota
+	in
+	leftLike
+)
 
 // Eq 等于
 func (c *Query) Eq(field, value string) *Query {
-	c.add(eq, field, value)
+	c.expressions = append(c.expressions, `(`+field+` == "`+value+`")`)
+	c.selectIndex(eq, field, value)
 	return c
 }
 
 // Ne 不等于
 func (c *Query) Ne(field, value string) *Query {
-	c.add(ne, field, value)
+	c.expressions = append(c.expressions, `(`+field+` != "`+value+`")`)
 	return c
 }
 
 // Gt 大于
 func (c *Query) Gt(field, value string) *Query {
-	c.add(gt, field, value)
+	c.expressions = append(c.expressions, `(float(`+field+`) > `+value+`)`)
 	return c
 }
 
 // Gte 大于或等于
 func (c *Query) Gte(field, value string) *Query {
-	c.add(gte, field, value)
+	c.expressions = append(c.expressions, `(float(`+field+`) >= `+value+`)`)
 	return c
 }
 
 // Lt 小于
 func (c *Query) Lt(field, value string) *Query {
-	c.add(lt, field, value)
+	c.expressions = append(c.expressions, `(float(`+field+`) < `+value+`)`)
 	return c
 }
 
 // Lte 小于或等于
 func (c *Query) Lte(field, value string) *Query {
-	c.add(lte, field, value)
+	c.expressions = append(c.expressions, `(float(`+field+`) <= `+value+`)`)
 	return c
 }
 
 // In 包含
 func (c *Query) In(field string, values ...string) *Query {
-	c.add(in, field, values...)
+	var els []string
+	for _, v := range values {
+		els = append(els, `(`+field+` == "`+v+`")`)
+	}
+	c.expressions = append(c.expressions, `(`+strings.Join(els, ` || `)+`)`)
+	c.selectIndex(in, field, values...)
 	return c
 }
 
 // NotIn 不包含
 func (c *Query) NotIn(field string, values ...string) *Query {
-	c.add(notIn, field, values...)
+	var els []string
+	for _, v := range values {
+		els = append(els, `(`+field+` != "`+v+`")`)
+	}
+	c.expressions = append(c.expressions, `(`+strings.Join(els, ` && `)+`)`)
 	return c
 }
 
 // Like 模糊匹配
 func (c *Query) Like(field, value string) *Query {
-	c.add(like, field, value)
+	c.expressions = append(c.expressions, `(indexOf(`+field+`, "`+value+`") >= 0)`)
 	return c
 }
 
 // LeftLike 模糊匹配-具有相同的前缀
 // 此方法会走字段索引
 func (c *Query) LeftLike(field, value string) *Query {
-	c.add(leftLike, field, value)
+	c.expressions = append(c.expressions, `(hasPrefix(`+field+`, "`+value+`") == true)`)
+	c.selectIndex(leftLike, field, value)
 	return c
 }
 
 // RightLike 模糊匹配-具有相同的后缀
 func (c *Query) RightLike(field, value string) *Query {
-	c.add(rightLike, field, value)
+	c.expressions = append(c.expressions, `(hasSuffix(`+field+`, "`+value+`") == true)`)
 	return c
 }
 
 // Exist 存在该字段
-func (c *Query) Exist(field, value string) *Query {
-	c.add(exist, field, value)
+func (c *Query) Exist(field string) *Query {
+	c.expressions = append(c.expressions, `(`+field+` != nil && len(`+field+`) > 0)`)
 	return c
 }
 
 // NotExist 不存在该字段
-func (c *Query) NotExist(field, value string) *Query {
-	c.add(notExist, field, value)
+// TODO
+/*
+func (c *Query) NotExist(field string) *Query {
+	c.expressions = append(c.expressions, `(`+field+` == nil || len(`+field+`) <= 0)`)
+	return c
+}
+*/
+
+// Must 交集拼接
+func (c *Query) Must(sc *SubQuery) *Query {
+	c.expressions = append(c.expressions, `(`+strings.Join(sc.expressions, " && ")+`)`)
 	return c
 }
 
-// And 交集拼接
-func (c *Query) And(sc *SubQuery) *Query {
-	return c.addFilter(strings.Join(sc.expr, " && "))
-}
-
-// Or 并集拼接
-func (c *Query) Or(sc *SubQuery) *Query {
-	return c.addFilter(strings.Join(sc.expr, " || "))
+// Should 并集拼接
+func (c *Query) Should(sc *SubQuery) *Query {
+	c.expressions = append(c.expressions, `(`+strings.Join(sc.expressions, " || ")+`)`)
+	return c
 }
 
 // 传入一个判断方法，入参是文档内容，返回值是bool
 // return true 则表明该文档符合查询条件，会将该文档加入到返回结果里
-func (c *Query) addFilter(expr string) *Query {
+func (c *Query) setFilter() *Query {
+	expr := strings.Join(c.expressions, " && ")
 	fmt.Println("expr", expr)
-	c.filters = append(c.filters, func(doc Doc) bool {
+	fmt.Println("idx", c.index.field, c.index.value)
+	c.filter = func(doc Doc) bool {
 		match, _ := c.parser.Match(expr, doc)
 		return match
-	})
+	}
 	return c
 }
 
@@ -211,7 +207,7 @@ func (c *Query) Count() (int64, error) {
 	return count, nil
 }
 
-func (c *Query) add(operator uint8, field string, values ...string) {
+func (c *Query) selectIndex(operator uint8, field string, values ...string) {
 	if len(field) <= 0 || len(values) <= 0 {
 		return
 	}
@@ -224,23 +220,18 @@ func (c *Query) add(operator uint8, field string, values ...string) {
 	if len(vs) <= 0 {
 		return
 	}
-	c.conditions = append(c.conditions, condition{
-		Field:    field,
-		Operator: operator,
-		Values:   vs,
-	})
 	// 如果当前没有命中的索引值
-	if !c.hit.HasValue() {
+	if len(c.index.field) <= 0 {
 		// 如果是等于或者左like查询，走索引
 		if operator == eq || operator == leftLike {
-			c.hit.field = field
-			c.hit.value = vs[0]
+			c.index.field = field
+			c.index.value = vs[0]
 		} else if operator == in {
 			// 如果是in查询，并且有共同前缀的话，走索引
 			prefix := getCommonPrefix(vs)
 			if len(prefix) > 0 {
-				c.hit.field = field
-				c.hit.value = prefix
+				c.index.field = field
+				c.index.value = prefix
 			}
 		}
 	}
@@ -273,46 +264,46 @@ func getCommonPrefix(ss []string) (prefix string) {
 }
 
 type SubQuery struct {
-	expr []string
+	expressions []string
 }
 
-func Sub() *SubQuery {
+func Expr() *SubQuery {
 	return &SubQuery{}
 }
 
 // Eq 等于
 func (c *SubQuery) Eq(field, value string) *SubQuery {
-	c.expr = append(c.expr, `(`+field+` == "`+value+`")`)
+	c.expressions = append(c.expressions, `(`+field+` == "`+value+`")`)
 	return c
 }
 
 // Ne 不等于
 func (c *SubQuery) Ne(field, value string) *SubQuery {
-	c.expr = append(c.expr, `(`+field+` != "`+value+`")`)
+	c.expressions = append(c.expressions, `(`+field+` != "`+value+`")`)
 	return c
 }
 
 // Gt 大于
 func (c *SubQuery) Gt(field, value string) *SubQuery {
-	c.expr = append(c.expr, `(float(`+field+`) > `+value+`)`)
+	c.expressions = append(c.expressions, `(float(`+field+`) > `+value+`)`)
 	return c
 }
 
 // Gte 大于或等于
 func (c *SubQuery) Gte(field, value string) *SubQuery {
-	c.expr = append(c.expr, `(float(`+field+`) >= `+value+`)`)
+	c.expressions = append(c.expressions, `(float(`+field+`) >= `+value+`)`)
 	return c
 }
 
 // Lt 小于
 func (c *SubQuery) Lt(field, value string) *SubQuery {
-	c.expr = append(c.expr, `(float(`+field+`) < `+value+`)`)
+	c.expressions = append(c.expressions, `(float(`+field+`) < `+value+`)`)
 	return c
 }
 
 // Lte 小于或等于
 func (c *SubQuery) Lte(field, value string) *SubQuery {
-	c.expr = append(c.expr, `(float(`+field+`) <= `+value+`)`)
+	c.expressions = append(c.expressions, `(float(`+field+`) <= `+value+`)`)
 	return c
 }
 
@@ -322,7 +313,7 @@ func (c *SubQuery) In(field string, values ...string) *SubQuery {
 	for _, v := range values {
 		els = append(els, `(`+field+` == "`+v+`")`)
 	}
-	c.expr = append(c.expr, `(`+strings.Join(els, ` || `)+`)`)
+	c.expressions = append(c.expressions, `(`+strings.Join(els, ` || `)+`)`)
 	return c
 }
 
@@ -332,49 +323,52 @@ func (c *SubQuery) NotIn(field string, values ...string) *SubQuery {
 	for _, v := range values {
 		els = append(els, `(`+field+` != "`+v+`")`)
 	}
-	c.expr = append(c.expr, `(`+strings.Join(els, ` && `)+`)`)
+	c.expressions = append(c.expressions, `(`+strings.Join(els, ` && `)+`)`)
 	return c
 }
 
 // Like 模糊匹配
 func (c *SubQuery) Like(field, value string) *SubQuery {
-	c.expr = append(c.expr, `(indexOf(`+field+`, "`+value+`") >= 0)`)
+	c.expressions = append(c.expressions, `(indexOf(`+field+`, "`+value+`") >= 0)`)
 	return c
 }
 
 // LeftLike 模糊匹配-具有相同的前缀
 // 此方法会走字段索引
 func (c *SubQuery) LeftLike(field, value string) *SubQuery {
-	c.expr = append(c.expr, `(hasPrefix(`+field+`, "`+value+`") == true)`)
+	c.expressions = append(c.expressions, `(hasPrefix(`+field+`, "`+value+`") == true)`)
 	return c
 }
 
 // RightLike 模糊匹配-具有相同的后缀
 func (c *SubQuery) RightLike(field, value string) *SubQuery {
-	c.expr = append(c.expr, `(hasSuffix(`+field+`, "`+value+`") == true)`)
+	c.expressions = append(c.expressions, `(hasSuffix(`+field+`, "`+value+`") == true)`)
 	return c
 }
 
 // Exist 存在该字段
 func (c *SubQuery) Exist(field string) *SubQuery {
-	c.expr = append(c.expr, `(len(`+field+`) > 0)`)
+	c.expressions = append(c.expressions, `(`+field+` != nil && len(`+field+`) > 0)`)
 	return c
 }
 
 // NotExist 不存在该字段
+// TODO
+/*
 func (c *SubQuery) NotExist(field string) *SubQuery {
-	c.expr = append(c.expr, `(len(`+field+`) <= 0)`)
+	c.expressions = append(c.expressions, `(`+field+` == nil || len(`+field+`) <= 0)`)
+	return c
+}
+*/
+
+// Must 交集拼接
+func (c *SubQuery) Must(sc *SubQuery) *SubQuery {
+	c.expressions = append(c.expressions, `(`+strings.Join(sc.expressions, ` && `)+`)`)
 	return c
 }
 
-// And 交集拼接
-func (c *SubQuery) And(sc *SubQuery) *SubQuery {
-	c.expr = append(c.expr, `(`+strings.Join(sc.expr, ` && `)+`)`)
-	return c
-}
-
-// Or 并集拼接
-func (c *SubQuery) Or(sc *SubQuery) *SubQuery {
-	c.expr = append(c.expr, `(`+strings.Join(sc.expr, ` || `)+`)`)
+// Should 并集拼接
+func (c *SubQuery) Should(sc *SubQuery) *SubQuery {
+	c.expressions = append(c.expressions, `(`+strings.Join(sc.expressions, ` || `)+`)`)
 	return c
 }
