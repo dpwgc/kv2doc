@@ -2,7 +2,6 @@ package kv2doc
 
 import (
 	"errors"
-	"fmt"
 	"strconv"
 	"strings"
 )
@@ -11,14 +10,14 @@ type Query struct {
 	db          *DB
 	table       string
 	expressions []string
-	index       index
+	index       Index
 	limit       limit
 	filter      func(doc Doc) bool
 	parser      *Parser
 	orderBy     func(l, r Doc) bool
 }
 
-type index struct {
+type Index struct {
 	field string
 	value string
 }
@@ -226,11 +225,8 @@ func toDouble(s string) (float64, error) {
 // 传入一个判断方法，入参是文档内容，返回值是bool
 // return true 则表明该文档符合查询条件，会将该文档加入到返回结果里
 func (c *Query) setFilter() *Query {
-	expr := strings.Join(c.expressions, " && ")
-	fmt.Println("expr", expr)
-	fmt.Println("idx", c.index.field, c.index.value)
 	c.filter = func(doc Doc) bool {
-		match, _ := c.parser.Match(expr, doc)
+		match, _ := c.parser.Match(strings.Join(c.expressions, " && "), doc)
 		return match
 	}
 	return c
@@ -276,6 +272,19 @@ func (c *Query) Count() (int64, error) {
 func (c *Query) Scroll(fn func(doc Doc) bool) error {
 	cc := *c
 	return scan(cc, fn)
+}
+
+type Explain struct {
+	Expr  string
+	Index Index
+}
+
+// Explain 执行计划
+func (c *Query) Explain() Explain {
+	return Explain{
+		Expr:  strings.Join(c.expressions, " && "),
+		Index: c.index,
+	}
 }
 
 func (c *Query) selectIndex(operator uint8, field string, values ...string) {

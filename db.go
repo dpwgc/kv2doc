@@ -169,7 +169,7 @@ func (c *DB) remove(table string, id string) (kvs []store.KV, err error) {
 	return nil, nil
 }
 
-type BatchCommand struct {
+type Cmd struct {
 	Id       string
 	Document Doc
 	Type     CmdType
@@ -183,7 +183,7 @@ const (
 	Remove
 )
 
-func (c *DB) Batch(table string, cmd ...BatchCommand) (ids []string, err error) {
+func (c *DB) Batch(table string, cmd ...Cmd) (ids []string, err error) {
 
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
