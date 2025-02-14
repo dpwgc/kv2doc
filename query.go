@@ -207,6 +207,12 @@ func (c *Query) Count() (int64, error) {
 	return count, nil
 }
 
+// Scroll 滚动查询
+func (c *Query) Scroll(fn func(doc Doc) bool) error {
+	cc := *c
+	return scroll(cc, fn)
+}
+
 func (c *Query) selectIndex(operator uint8, field string, values ...string) {
 	if len(field) <= 0 || len(values) <= 0 {
 		return

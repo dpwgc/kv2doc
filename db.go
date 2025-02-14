@@ -227,6 +227,7 @@ func (c *DB) Query(table string) *Query {
 	}
 }
 
+// 普通查询
 func query(query Query, justCount bool) (count int64, docs []Doc, err error) {
 	if len(query.table) <= 0 || query.db == nil {
 		return 0, nil, nil
@@ -288,13 +289,27 @@ func query(query Query, justCount bool) (count int64, docs []Doc, err error) {
 	return count, docs, nil
 }
 
-// Scroll 滚动扫描全表
-func (c *DB) Scroll(table string, fn func(doc Doc) bool) (err error) {
-	return c.store.ScanKV(table, primaryPrefix, func(key string, value []byte) bool {
-		doc := Doc{}
-		doc = doc.fromBytes(value)
-		return fn(doc)
-	})
+// 滚动查询
+func scroll(query Query, fn func(doc Doc) bool) (err error) {
+	if len(query.table) <= 0 || query.db == nil || fn == nil {
+		return nil
+	}
+	query.setFilter()
+	if len(query.index.field) > 0 {
+		// 走索引
+		return query.db.store.ScanKV(query.table, toPath(fieldPrefix, query.index.field, query.index.value), func(key string, value []byte) bool {
+			doc := Doc{}
+			doc = doc.fromBytes(value)
+			return fn(doc)
+		})
+	} else {
+		// 全表扫描
+		return query.db.store.ScanKV(query.table, primaryPrefix, func(key string, value []byte) bool {
+			doc := Doc{}
+			doc = doc.fromBytes(value)
+			return fn(doc)
+		})
+	}
 }
 
 func toPath(s ...string) string {
