@@ -1,6 +1,6 @@
 # kv2doc
 
-## 一个简单的嵌入式文档数据库实现，基于 Go + BoltDB
+## 一个嵌入式文档数据库，基于 Go + BoltDB + Expr-lang 实现
 
 ### 实现功能
 
@@ -52,24 +52,24 @@ func main() {
 		"color": "red",
 	})
 
-	// 查询文档，筛选条件：title 以 hello 为前缀, 并且 type 要大于 0 或者 存在 color 字段，结果集按主键ID排序后，取前10条返回
+	// 查询文档，筛选条件：title 以 hello 为前缀, type 要大于 0 且 存在 color 字段，结果集按主键ID排序后，取前10条返回
 	// 使用 Eq 或 LeftLike 进行查询时，会走最左前缀索引，其他查询方法走全表扫描
 	documents, _ := db.Query("test_table").
 		LeftLike("title", "hello").
-		Should(kv2doc.Expr().Gt("type", "0").Exist("color")).
+		Must(kv2doc.Expr().Gt("type", "0").Exist("color")).
 		Desc("_id").
 		Limit(0, 10).
 		List()
 
 	// 打印查询结果
 	for _, v := range documents {
-		fmt.Println(v.ID(), v, v.Created())
+		fmt.Println(v.ToJson())
 	}
 
 	// 查看Query执行计划
 	explain := db.Query("test_table").
 		LeftLike("title", "hello").
-		Should(kv2doc.Expr().Gt("type", "0").Exist("color")).
+		Must(kv2doc.Expr().Gt("type", "0").Exist("color")).
 		Explain()
 
 	// 具体执行逻辑
@@ -79,6 +79,44 @@ func main() {
 	fmt.Println("index:", explain.Index)
 }
 ```
+
+***
+
+### 函数说明
+
+| 名称              | 功能                  |
+|-----------------|---------------------|
+| kv2doc.NewDB    | 创建/打开一个数据库          |
+| kv2doc.ByStore  | 创建/打开一个数据库（自定义存储引擎） |
+| db.Add          | 新增文档（表不存在时自动建表）     |
+| db.Edit         | 编辑文档                |
+| db.Remove       | 删除文档                |
+| db.Bulk         | 批量操作（增删改）           |
+| db.Drop         | 删除表                 |
+| db.Query        | 新建查询                |
+| Query.Eq        | 等于                  |
+| Query.Ne        | 不等于                 |
+| Query.Gt        | 大于                  |
+| Query.Gte       | 大于等于                |
+| Query.Lt        | 小于                  |
+| Query.Lte       | 小于等于                |
+| Query.In        | 包含                  |
+| Query.NotIn     | 不包含                 |
+| Query.Like      | 含有                  |
+| Query.LeftLike  | 相同前缀                |
+| Query.RightLike | 相同后缀                |
+| Query.Exist     | 存在                  |
+| Query.NotExist  | 不存在                 |
+| Query.Must      | 交集语句                |
+| Query.Should    | 并集语句                |
+| Query.Asc       | 正序                  |
+| Query.Desc      | 倒序                  |
+| Query.Limit     | 分页                  |
+| Query.One       | 返回一个文档              |
+| Query.List      | 返回多个文档              |
+| Query.Count     | 返回文档数量              |
+| Query.Scroll    | 滚动查询文档              |
+| Query.Explain   | 查看执行计划              |
 
 ***
 

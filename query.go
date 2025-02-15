@@ -1,9 +1,14 @@
 package kv2doc
 
 import (
-	"errors"
 	"strconv"
 	"strings"
+)
+
+const (
+	eq = iota
+	in
+	leftLike
 )
 
 type Query struct {
@@ -14,11 +19,17 @@ type Query struct {
 	limit       limit
 	parser      *Parser
 	sort        func(l, r Doc) bool
+	isChild     bool
 }
 
 type Index struct {
 	field string
 	value string
+}
+
+type Explain struct {
+	Expr  string
+	Index Index
 }
 
 type limit struct {
@@ -27,32 +38,11 @@ type limit struct {
 	size   int
 }
 
-// Limit 分页方法，逻辑和 MySQL 的 Limit 相同，limit 10 或 limit 0,10
-func (c *Query) Limit(values ...int) *Query {
-	cursor := 0
-	size := 0
-	if len(values) > 1 {
-		cursor = values[0]
-		size = values[1]
-	} else if len(values) > 0 {
-		size = values[0]
-	} else {
-		return c
+func Expr() *Query {
+	return &Query{
+		isChild: true,
 	}
-	if cursor < 0 || size < 0 {
-		return c
-	}
-	c.limit.enable = true
-	c.limit.cursor = cursor
-	c.limit.size = size
-	return c
 }
-
-const (
-	eq = iota
-	in
-	leftLike
-)
 
 // Eq 等于
 func (c *Query) Eq(field, value string) *Query {
@@ -151,13 +141,13 @@ func (c *Query) NotExist(field string) *Query {
 }
 
 // Must 交集拼接
-func (c *Query) Must(sc *SubQuery) *Query {
+func (c *Query) Must(sc *Query) *Query {
 	c.expressions = append(c.expressions, `(`+strings.Join(sc.expressions, " && ")+`)`)
 	return c
 }
 
 // Should 并集拼接
-func (c *Query) Should(sc *SubQuery) *Query {
+func (c *Query) Should(sc *Query) *Query {
 	c.expressions = append(c.expressions, `(`+strings.Join(sc.expressions, " || ")+`)`)
 	return c
 }
@@ -178,14 +168,17 @@ func (c *Query) Desc(fields ...string) *Query {
 }
 
 func (c *Query) Sort(rule SortRule, fields ...string) *Query {
+	if c.isChild {
+		return c
+	}
 	c.sort = func(l, r Doc) bool {
 		for _, v := range fields {
 			if l[v] == r[v] {
 				continue
 			}
-			ld, le := toDouble(l[v])
-			rd, re := toDouble(r[v])
-			if le == nil && re == nil {
+			ld, lb := toDouble(l[v])
+			rd, rb := toDouble(r[v])
+			if lb && rb {
 				if rule == Asc {
 					if ld < rd {
 						return true
@@ -214,18 +207,35 @@ func (c *Query) Sort(rule SortRule, fields ...string) *Query {
 	return c
 }
 
-func toDouble(s string) (float64, error) {
-	if len(s) <= 0 {
-		return 0, errors.New("s is empty")
+// Limit 分页方法，逻辑和 MySQL 的 Limit 相同，limit 10 或 limit 0,10
+func (c *Query) Limit(values ...int) *Query {
+	if c.isChild {
+		return c
 	}
-	if !strings.Contains(s, ".") {
-		s = s + ".0"
+	cursor := 0
+	size := 0
+	if len(values) > 1 {
+		cursor = values[0]
+		size = values[1]
+	} else if len(values) > 0 {
+		size = values[0]
+	} else {
+		return c
 	}
-	return strconv.ParseFloat(s, 64)
+	if cursor < 0 || size < 0 {
+		return c
+	}
+	c.limit.enable = true
+	c.limit.cursor = cursor
+	c.limit.size = size
+	return c
 }
 
 // One 查询单个文档
 func (c *Query) One() (doc Doc, err error) {
+	if c.isChild {
+		return Doc{}, nil
+	}
 	cc := *c
 	cc.limit.enable = true
 	cc.limit.size = 1
@@ -241,6 +251,9 @@ func (c *Query) One() (doc Doc, err error) {
 
 // List 返回多个文档
 func (c *Query) List() (docs []Doc, err error) {
+	if c.isChild {
+		return nil, nil
+	}
 	cc := *c
 	_, docs, err = query(cc, false)
 	return docs, err
@@ -248,6 +261,9 @@ func (c *Query) List() (docs []Doc, err error) {
 
 // Count 返回文档数量
 func (c *Query) Count() (count int64, err error) {
+	if c.isChild {
+		return 0, nil
+	}
 	cc := *c
 	cc.limit.enable = false
 	count, _, err = query(cc, true)
@@ -256,13 +272,11 @@ func (c *Query) Count() (count int64, err error) {
 
 // Scroll 滚动查询
 func (c *Query) Scroll(fn func(doc Doc) bool) error {
+	if c.isChild {
+		return nil
+	}
 	cc := *c
 	return scan(cc, fn)
-}
-
-type Explain struct {
-	Expr  string
-	Index Index
 }
 
 // Explain 执行计划
@@ -274,7 +288,7 @@ func (c *Query) Explain() Explain {
 }
 
 func (c *Query) selectIndex(operator uint8, field string, values ...string) {
-	if len(field) <= 0 || len(values) <= 0 {
+	if c.isChild || len(field) <= 0 || len(values) <= 0 {
 		return
 	}
 	var vs []string
@@ -329,115 +343,16 @@ func getCommonPrefix(ss []string) (prefix string) {
 	return prefix
 }
 
-type SubQuery struct {
-	expressions []string
-}
-
-func Expr() *SubQuery {
-	return &SubQuery{}
-}
-
-// Eq 等于
-func (c *SubQuery) Eq(field, value string) *SubQuery {
-	c.expressions = append(c.expressions, `(`+field+` == "`+value+`")`)
-	return c
-}
-
-// Ne 不等于
-func (c *SubQuery) Ne(field, value string) *SubQuery {
-	c.expressions = append(c.expressions, `(`+field+` != "`+value+`")`)
-	return c
-}
-
-// Gt 大于
-func (c *SubQuery) Gt(field, value string) *SubQuery {
-	c.expressions = append(c.expressions, `(float(`+field+`) > `+value+`)`)
-	return c
-}
-
-// Gte 大于或等于
-func (c *SubQuery) Gte(field, value string) *SubQuery {
-	c.expressions = append(c.expressions, `(float(`+field+`) >= `+value+`)`)
-	return c
-}
-
-// Lt 小于
-func (c *SubQuery) Lt(field, value string) *SubQuery {
-	c.expressions = append(c.expressions, `(float(`+field+`) < `+value+`)`)
-	return c
-}
-
-// Lte 小于或等于
-func (c *SubQuery) Lte(field, value string) *SubQuery {
-	c.expressions = append(c.expressions, `(float(`+field+`) <= `+value+`)`)
-	return c
-}
-
-// In 包含
-func (c *SubQuery) In(field string, values ...string) *SubQuery {
-	var els []string
-	for _, v := range values {
-		els = append(els, `(`+field+` == "`+v+`")`)
+func toDouble(s string) (float64, bool) {
+	if len(s) <= 0 {
+		return 0, false
 	}
-	c.expressions = append(c.expressions, `(`+strings.Join(els, ` || `)+`)`)
-	return c
-}
-
-// NotIn 不包含
-func (c *SubQuery) NotIn(field string, values ...string) *SubQuery {
-	var els []string
-	for _, v := range values {
-		els = append(els, `(`+field+` != "`+v+`")`)
+	if !strings.Contains(s, ".") {
+		s = s + ".0"
 	}
-	c.expressions = append(c.expressions, `(`+strings.Join(els, ` && `)+`)`)
-	return c
-}
-
-// Like 模糊匹配
-func (c *SubQuery) Like(field, value string) *SubQuery {
-	c.expressions = append(c.expressions, `(indexOf(`+field+`, "`+value+`") >= 0)`)
-	return c
-}
-
-// LeftLike 模糊匹配-具有相同的前缀
-// 此方法会走字段索引
-func (c *SubQuery) LeftLike(field, value string) *SubQuery {
-	c.expressions = append(c.expressions, `(hasPrefix(`+field+`, "`+value+`") == true)`)
-	return c
-}
-
-// RightLike 模糊匹配-具有相同的后缀
-func (c *SubQuery) RightLike(field, value string) *SubQuery {
-	c.expressions = append(c.expressions, `(hasSuffix(`+field+`, "`+value+`") == true)`)
-	return c
-}
-
-// Exist 存在该字段
-func (c *SubQuery) Exist(field string) *SubQuery {
-	if field != primaryKey && field != createdAt && field != updatedAt {
-		c.expressions = append(c.expressions, `(indexOf(_fields, "/`+field+`") >= 0)`)
+	fl, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, false
 	}
-	return c
-}
-
-// NotExist 不存在该字段
-func (c *SubQuery) NotExist(field string) *SubQuery {
-	if field != primaryKey && field != createdAt && field != updatedAt {
-		c.expressions = append(c.expressions, `(indexOf(_fields, "/`+field+`") < 0)`)
-	} else {
-		c.expressions = append(c.expressions, `(false)`)
-	}
-	return c
-}
-
-// Must 交集拼接
-func (c *SubQuery) Must(sc *SubQuery) *SubQuery {
-	c.expressions = append(c.expressions, `(`+strings.Join(sc.expressions, ` && `)+`)`)
-	return c
-}
-
-// Should 并集拼接
-func (c *SubQuery) Should(sc *SubQuery) *SubQuery {
-	c.expressions = append(c.expressions, `(`+strings.Join(sc.expressions, ` || `)+`)`)
-	return c
+	return fl, true
 }

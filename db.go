@@ -72,7 +72,7 @@ func (c *DB) Add(table string, doc Doc) (id string, err error) {
 }
 
 func (c *DB) add(table string, doc Doc) (kvs []store.KV, id string, err error) {
-	if len(table) <= 0 && !doc.isValid() {
+	if len(table) <= 0 && !doc.IsValid() {
 		return nil, "", errors.New("parameter error")
 	}
 	err = c.store.CreateTable(table)
@@ -88,10 +88,10 @@ func (c *DB) add(table string, doc Doc) (kvs []store.KV, id string, err error) {
 	doc[primaryKey] = id
 	doc[updatedAt] = fmt.Sprintf("%v", time.Now().UnixMilli())
 	doc[createdAt] = doc[updatedAt]
-	doc[fields] = "/" + toPath(doc.fields()...)
+	doc[fields] = "/" + toPath(doc.UserFields()...)
 	kvs = append(kvs, store.KV{
 		Key:   toPath(primaryPrefix, primaryKey, id),
-		Value: doc.toBytes(),
+		Value: doc.ToBytes(),
 	})
 	for k, v := range doc {
 		kvs = append(kvs, store.KV{
@@ -118,7 +118,7 @@ func (c *DB) Edit(table string, id string, doc Doc) (err error) {
 }
 
 func (c *DB) edit(table string, id string, doc Doc) (kvs []store.KV, err error) {
-	if len(table) <= 0 && len(id) <= 0 && !doc.isValid() {
+	if len(table) <= 0 && len(id) <= 0 && !doc.IsValid() {
 		return nil, errors.New("parameter error")
 	}
 	// 获取老的文档
@@ -129,20 +129,20 @@ func (c *DB) edit(table string, id string, doc Doc) (kvs []store.KV, err error) 
 	if !kv.HasKey() {
 		return nil, nil
 	}
-	old := Doc{}.fromBytes(kv.Value)
+	old := Doc{}.FromBytes(kv.Value)
 
 	doc[primaryKey] = id
 	doc[updatedAt] = fmt.Sprintf("%v", time.Now().UnixMilli())
 	doc[createdAt] = old[createdAt]
-	doc[fields] = "/" + toPath(doc.fields()...)
+	doc[fields] = "/" + toPath(doc.UserFields()...)
 	kvs = append(kvs, store.KV{
 		Key:   toPath(primaryPrefix, primaryKey, id),
-		Value: doc.toBytes(),
+		Value: doc.ToBytes(),
 	})
 
 	for k := range old {
 		// 如果新保存的文档不包含这个老的字段
-		if old.hasKey(k) && !doc.hasKey(k) {
+		if old.HasField(k) && !doc.HasField(k) {
 			// 删除这个字段
 			kvs = append(kvs, store.KV{
 				Key: toPath(fieldPrefix, k, old[k], id),
@@ -185,7 +185,7 @@ func (c *DB) remove(table string, id string) (kvs []store.KV, err error) {
 	if !kv.HasKey() {
 		return nil, nil
 	}
-	old := Doc{}.fromBytes(kv.Value)
+	old := Doc{}.FromBytes(kv.Value)
 
 	kvs = append(kvs, store.KV{
 		Key: toPath(primaryPrefix, primaryKey, id),
@@ -255,9 +255,10 @@ func (c *DB) Bulk(table string, cs ...Command) (ids []string, err error) {
 // Query 查询文档
 func (c *DB) Query(table string) *Query {
 	return &Query{
-		db:     c,
-		table:  table,
-		parser: NewParser(),
+		db:      c,
+		table:   table,
+		parser:  NewParser(),
+		isChild: false,
 	}
 }
 
@@ -319,9 +320,9 @@ func scan(query Query, fn func(doc Doc) bool) (err error) {
 			if !kv.HasKey() {
 				return true
 			}
-			doc = doc.fromBytes(kv.Value)
+			doc = doc.FromBytes(kv.Value)
 			// 跳过异常文档
-			if !doc.isValid() || len(doc[primaryKey]) <= 0 {
+			if !doc.IsValid() || len(doc[primaryKey]) <= 0 {
 				return true
 			}
 			// 过滤逻辑
@@ -334,9 +335,9 @@ func scan(query Query, fn func(doc Doc) bool) (err error) {
 		// 全表扫描
 		return query.db.store.ScanKV(query.table, primaryPrefix, func(key string, value []byte) bool {
 			doc := Doc{}
-			doc = doc.fromBytes(value)
+			doc = doc.FromBytes(value)
 			// 跳过异常文档
-			if !doc.isValid() || len(doc[primaryKey]) <= 0 {
+			if !doc.IsValid() || len(doc[primaryKey]) <= 0 {
 				return true
 			}
 			// 过滤逻辑
