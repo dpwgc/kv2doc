@@ -76,6 +76,9 @@ func main() {
 
 	// 选择了哪个索引
 	fmt.Println("index:", explain.Index)
+
+	// 删除表
+	_ = db.Drop("test_table")
 }
 ```
 
@@ -89,7 +92,7 @@ func main() {
 | kv2doc.ByStore  | 创建/打开一个数据库（自定义存储引擎） |
 | db.Add          | 新增文档（表不存在时自动建表）     |
 | db.Edit         | 编辑文档                |
-| db.Remove       | 删除文档                |
+| db.Delete       | 删除文档                |
 | db.Bulk         | 批量操作（增删改）           |
 | db.Drop         | 删除表                 |
 | db.Query        | 新建查询                |

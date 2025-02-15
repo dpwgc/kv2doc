@@ -160,13 +160,13 @@ func (c *DB) edit(table string, id string, doc Doc) (kvs []store.KV, err error) 
 	return kvs, nil
 }
 
-// Remove 删除指定表中的指定文档记录
-func (c *DB) Remove(table string, id string) (err error) {
+// Delete 删除指定表中的指定文档记录
+func (c *DB) Delete(table string, id string) (err error) {
 
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	kvs, err := c.remove(table, id)
+	kvs, err := c.delete(table, id)
 	if err != nil {
 		return err
 	}
@@ -174,7 +174,7 @@ func (c *DB) Remove(table string, id string) (err error) {
 	return c.store.SetKV(table, kvs)
 }
 
-func (c *DB) remove(table string, id string) (kvs []store.KV, err error) {
+func (c *DB) delete(table string, id string) (kvs []store.KV, err error) {
 	if len(table) <= 0 && len(id) <= 0 {
 		return nil, errors.New("parameter error")
 	}
@@ -198,58 +198,11 @@ func (c *DB) remove(table string, id string) (kvs []store.KV, err error) {
 	return nil, nil
 }
 
-type Command struct {
-	Id       string
-	Document Doc
-	Action   Action
-}
-
-type Action int
-
-const (
-	Add Action = iota
-	Edit
-	Remove
-)
-
 // Bulk 批量操作
-func (c *DB) Bulk(table string, cs ...Command) (ids []string, err error) {
-
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-
-	var allKvs []store.KV
-	for _, v := range cs {
-		if v.Action == Add {
-			kvs, id, err := c.add(table, v.Document)
-			if err != nil {
-				return nil, err
-			}
-			allKvs = append(allKvs, kvs...)
-			ids = append(ids, id)
-		}
-		if v.Action == Edit {
-			kvs, err := c.edit(table, v.Id, v.Document)
-			if err != nil {
-				return nil, err
-			}
-			allKvs = append(allKvs, kvs...)
-			ids = append(ids, v.Id)
-		}
-		if v.Action == Remove {
-			kvs, err := c.remove(table, v.Id)
-			if err != nil {
-				return nil, err
-			}
-			allKvs = append(allKvs, kvs...)
-			ids = append(ids, v.Id)
-		}
+func (c *DB) Bulk(table string) *Bulk {
+	return &Bulk{
+		table: table,
 	}
-	err = c.store.SetKV(table, allKvs)
-	if err != nil {
-		return nil, err
-	}
-	return ids, nil
 }
 
 // Query 查询文档

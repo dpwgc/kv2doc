@@ -52,4 +52,7 @@ func main() {
 
 	// 选择了哪个索引
 	fmt.Println("index:", explain.Index)
+
+	// 删除表
+	_ = db.Drop("test_table")
 }

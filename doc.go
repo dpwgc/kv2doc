@@ -24,19 +24,39 @@ func (c Doc) FromJson(s string) Doc {
 	return c.FromBytes([]byte(s))
 }
 
-func (c Doc) ID() int64 {
-	i, _ := strconv.ParseInt(c[primaryKey], 10, 64)
+func (c Doc) NumberID() int64 {
+	i, _ := strconv.ParseInt(c.ID(), 10, 64)
 	return i
 }
 
-func (c Doc) Created() time.Time {
-	i, _ := strconv.ParseInt(c[createdAt], 10, 64)
-	return time.Unix(i/1000, 0)
+func (c Doc) ID() string {
+	return c[primaryKey]
 }
 
-func (c Doc) Updated() time.Time {
+func (c Doc) CreatedAt() string {
+	return c[createdAt]
+}
+
+func (c Doc) UpdatedAt() string {
+	return c[updatedAt]
+}
+
+func (c Doc) CreatedMill() int64 {
+	i, _ := strconv.ParseInt(c[createdAt], 10, 64)
+	return i
+}
+
+func (c Doc) UpdatedMill() int64 {
 	i, _ := strconv.ParseInt(c[updatedAt], 10, 64)
-	return time.Unix(i/1000, 0)
+	return i
+}
+
+func (c Doc) CreatedTime() time.Time {
+	return time.Unix(c.CreatedMill()/1000, 0)
+}
+
+func (c Doc) UpdatedTime() time.Time {
+	return time.Unix(c.UpdatedMill()/1000, 0)
 }
 
 func (c Doc) IsValid() bool {
