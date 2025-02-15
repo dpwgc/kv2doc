@@ -152,22 +152,20 @@ func (c *Query) Should(sc *Query) *Query {
 	return c
 }
 
-type SortRule int
-
 const (
-	Asc SortRule = iota
-	Desc
+	asc = iota
+	desc
 )
 
 func (c *Query) Asc(fields ...string) *Query {
-	return c.Sort(Asc, fields...)
+	return c.orderBy(asc, fields...)
 }
 
 func (c *Query) Desc(fields ...string) *Query {
-	return c.Sort(Desc, fields...)
+	return c.orderBy(desc, fields...)
 }
 
-func (c *Query) Sort(rule SortRule, fields ...string) *Query {
+func (c *Query) orderBy(rule int, fields ...string) *Query {
 	if c.isChild {
 		return c
 	}
@@ -179,23 +177,23 @@ func (c *Query) Sort(rule SortRule, fields ...string) *Query {
 			ld, lb := toDouble(l[v])
 			rd, rb := toDouble(r[v])
 			if lb && rb {
-				if rule == Asc {
+				if rule == asc {
 					if ld < rd {
 						return true
 					}
 				}
-				if rule == Desc {
+				if rule == desc {
 					if ld > rd {
 						return true
 					}
 				}
 			} else {
-				if rule == Asc {
+				if rule == asc {
 					if l[v] < r[v] {
 						return true
 					}
 				}
-				if rule == Desc {
+				if rule == desc {
 					if l[v] > r[v] {
 						return true
 					}

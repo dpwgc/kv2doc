@@ -5,42 +5,42 @@ import "github.com/dpwgc/kv2doc/store"
 type Bulk struct {
 	db      *DB
 	table   string
-	actions []Action
+	actions []action
 }
 
-type Action struct {
+type action struct {
 	Id       string
 	Document Doc
 	Type     int
 }
 
 const (
-	Add = iota
-	Edit
-	Delete
+	add = iota
+	edit
+	del
 )
 
 func (c *Bulk) Add(doc Doc) *Bulk {
-	c.actions = append(c.actions, Action{
+	c.actions = append(c.actions, action{
 		Document: doc,
-		Type:     Add,
+		Type:     add,
 	})
 	return c
 }
 
 func (c *Bulk) Edit(id string, doc Doc) *Bulk {
-	c.actions = append(c.actions, Action{
+	c.actions = append(c.actions, action{
 		Id:       id,
 		Document: doc,
-		Type:     Edit,
+		Type:     edit,
 	})
 	return c
 }
 
 func (c *Bulk) Delete(id string) *Bulk {
-	c.actions = append(c.actions, Action{
+	c.actions = append(c.actions, action{
 		Id:   id,
-		Type: Delete,
+		Type: del,
 	})
 	return c
 }
@@ -52,7 +52,7 @@ func (c *Bulk) Exec() (ids []string, err error) {
 
 	var allKvs []store.KV
 	for _, v := range c.actions {
-		if v.Type == Add {
+		if v.Type == add {
 			kvs, id, err := c.db.add(c.table, v.Document)
 			if err != nil {
 				return nil, err
@@ -60,7 +60,7 @@ func (c *Bulk) Exec() (ids []string, err error) {
 			allKvs = append(allKvs, kvs...)
 			ids = append(ids, id)
 		}
-		if v.Type == Edit {
+		if v.Type == edit {
 			kvs, err := c.db.edit(c.table, v.Id, v.Document)
 			if err != nil {
 				return nil, err
@@ -68,7 +68,7 @@ func (c *Bulk) Exec() (ids []string, err error) {
 			allKvs = append(allKvs, kvs...)
 			ids = append(ids, v.Id)
 		}
-		if v.Type == Delete {
+		if v.Type == del {
 			kvs, err := c.db.delete(c.table, v.Id)
 			if err != nil {
 				return nil, err
